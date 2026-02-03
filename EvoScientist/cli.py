@@ -47,7 +47,11 @@ EVOSCIENTIST_ASCII_LINES = [
 _GRADIENT_COLORS = ["#1a237e", "#1565c0", "#1e88e5", "#42a5f5", "#64b5f6", "#90caf9"]
 
 
-def print_banner(thread_id: str, workspace_dir: str | None = None):
+def print_banner(
+    thread_id: str,
+    workspace_dir: str | None = None,
+    memory_dir: str | None = None,
+):
     """Print welcome banner with ASCII art logo, thread ID, and workspace path."""
     for line, color in zip(EVOSCIENTIST_ASCII_LINES, _GRADIENT_COLORS):
         console.print(Text(line, style=f"{color} bold"))
@@ -57,6 +61,10 @@ def print_banner(thread_id: str, workspace_dir: str | None = None):
     if workspace_dir:
         info.append("\n  Workspace: ", style="dim")
         info.append(workspace_dir, style="cyan")
+    if memory_dir:
+        trimmed = memory_dir.rstrip("/").rstrip("\\")
+        info.append("\n  Memory dir: ", style="dim")
+        info.append(trimmed, style="cyan")
     info.append("\n  Commands: ", style="dim")
     info.append("/exit", style="bold")
     info.append(", ", style="dim")
@@ -81,7 +89,9 @@ def cmd_interactive(agent: Any, show_thinking: bool = True, workspace_dir: str |
         workspace_dir: Per-session workspace directory path
     """
     thread_id = str(uuid.uuid4())
-    print_banner(thread_id, workspace_dir)
+    from .EvoScientist import MEMORY_DIR
+    memory_dir = MEMORY_DIR
+    print_banner(thread_id, workspace_dir, memory_dir)
 
     history_file = str(os.path.expanduser("~/.EvoScientist_history"))
     session = PromptSession(
@@ -129,6 +139,8 @@ def cmd_interactive(agent: Any, show_thinking: bool = True, workspace_dir: str |
                 console.print(f"[dim]Thread:[/dim] [yellow]{thread_id}[/yellow]")
                 if workspace_dir:
                     console.print(f"[dim]Workspace:[/dim] [cyan]{workspace_dir}[/cyan]")
+                if memory_dir:
+                    console.print(f"[dim]Memory dir:[/dim] [cyan]{memory_dir}[/cyan]")
                 console.print()
                 continue
 

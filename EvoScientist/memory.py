@@ -30,13 +30,15 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, cast
+from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any, Annotated, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
     ModelRequest,
     ModelResponse,
+    PrivateStateAttr,
 )
 from langchain.tools import ToolRuntime
 from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
@@ -48,6 +50,15 @@ if TYPE_CHECKING:
     from deepagents.backends.protocol import BACKEND_TYPES, BackendProtocol
 
 logger = logging.getLogger(__name__)
+
+_CURRENT_MEMORY: ContextVar[str] = ContextVar("evo_memory_current", default="")
+_STATE_MEMORY_KEY = "evo_memory_content"
+
+
+class EvoMemoryState(AgentState):
+    """State schema for EvoMemoryMiddleware."""
+
+    evo_memory_content: NotRequired[Annotated[str, PrivateStateAttr]]
 
 # ---------------------------------------------------------------------------
 # Extraction prompt – sent to a (cheap) LLM to pull structured facts
@@ -163,6 +174,104 @@ Use this to personalize your responses and avoid re-asking known information.
 information — before composing your main response.
 </memory_instructions>"""
 
+DEFAULT_MEMORY_TEMPLATE = """# EvoScientist Memory
+
+## User Profile
+- **Name**: (unknown)
+- **Role**: (unknown)
+- **Institution**: (unknown)
+- **Language**: (unknown)
+
+## Research Preferences
+- **Primary Domain**: (unknown)
+- **Sub-fields**: (unknown)
+- **Preferred Frameworks**: (unknown)
+- **Preferred Models**: (unknown)
+- **Hardware**: (unknown)
+- **Constraints**: (unknown)
+
+## Experiment History
+(No experiments yet)
+
+## Learned Preferences
+- (none yet)
+"""
+
+
+def _get_thread_id(runtime: Runtime) -> str:
+    try:
+        config = cast("RunnableConfig", getattr(runtime, "config", {}))
+        if isinstance(config, dict):
+            thread_id = config.get("configurable", {}).get("thread_id")
+            if thread_id is not None:
+                return str(thread_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to resolve thread_id from runtime config")
+    return "default"
+
+
+def _ensure_section(content: str, marker: str, body: str) -> str:
+    if marker in content:
+        return content
+    content = content.rstrip()
+    if content:
+        content += "\n\n"
+    return f"{content}{marker}\n{body.rstrip()}\n"
+
+
+def _ensure_memory_template(existing_md: str) -> str:
+    if not existing_md.strip():
+        return DEFAULT_MEMORY_TEMPLATE
+
+    result = existing_md
+    if "# EvoScientist Memory" not in result:
+        result = "# EvoScientist Memory\n\n" + result.lstrip()
+
+    result = _ensure_section(
+        result,
+        "## User Profile",
+        "\n".join(
+            [
+                "- **Name**: (unknown)",
+                "- **Role**: (unknown)",
+                "- **Institution**: (unknown)",
+                "- **Language**: (unknown)",
+            ],
+        ),
+    )
+    result = _ensure_section(
+        result,
+        "## Research Preferences",
+        "\n".join(
+            [
+                "- **Primary Domain**: (unknown)",
+                "- **Sub-fields**: (unknown)",
+                "- **Preferred Frameworks**: (unknown)",
+                "- **Preferred Models**: (unknown)",
+                "- **Hardware**: (unknown)",
+                "- **Constraints**: (unknown)",
+            ],
+        ),
+    )
+    result = _ensure_section(result, "## Experiment History", "(No experiments yet)")
+    result = _ensure_section(result, "## Learned Preferences", "- (none yet)")
+    return result
+
+
+def _section_bounds(content: str, marker: str) -> tuple[int | None, int | None]:
+    idx = content.find(marker)
+    if idx == -1:
+        return None, None
+    start = idx + len(marker)
+    next_marker = content.find("\n## ", start)
+    if next_marker == -1:
+        next_marker = len(content)
+    return start, next_marker
+
+
+def _normalize_item(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
 
 # ---------------------------------------------------------------------------
 # Helper: merge extracted JSON into MEMORY.md markdown
@@ -177,7 +286,7 @@ def _merge_memory(existing_md: str, extracted: dict[str, Any]) -> str:
     if not extracted:
         return existing_md
 
-    result = existing_md
+    result = _ensure_memory_template(existing_md)
 
     # --- User Profile ---
     profile = extracted.get("user_profile")
@@ -216,10 +325,12 @@ def _merge_memory(existing_md: str, extracted: dict[str, Any]) -> str:
 
     # --- Experiment History (append) ---
     exp = extracted.get("experiment_conclusion")
-    if exp and isinstance(exp, dict) and exp.get("title"):
+    should_add_exp = bool(exp and isinstance(exp, dict) and exp.get("title"))
+    if should_add_exp:
         from datetime import datetime
         date_str = datetime.now().strftime("%Y-%m-%d")
-        entry = f"\n### [{date_str}] {exp.get('title', 'Untitled')}\n"
+        title = str(exp.get("title", "Untitled")).strip()
+        entry = f"\n### [{date_str}] {title}\n"
         entry += f"- **Question**: {exp.get('question', 'N/A')}\n"
         entry += f"- **Method**: {exp.get('method', 'N/A')}\n"
         entry += f"- **Key Result**: {exp.get('key_result', 'N/A')}\n"
@@ -227,6 +338,20 @@ def _merge_memory(existing_md: str, extracted: dict[str, Any]) -> str:
         if exp.get("artifacts"):
             entry += f"- **Artifacts**: {exp['artifacts']}\n"
 
+        # Remove placeholder if present
+        exp_start, exp_end = _section_bounds(result, "## Experiment History")
+        if exp_start is not None and exp_end is not None:
+            exp_section = result[exp_start:exp_end]
+            exp_lines = [
+                line for line in exp_section.splitlines() if "(No experiments yet)" not in line
+            ]
+            result = result[:exp_start] + "\n" + "\n".join(exp_lines).strip("\n") + "\n" + result[exp_end:]
+
+        # De-duplicate by title if already present
+        if re.search(rf"### \[[0-9-]+\] {re.escape(title)}\b", result):
+            should_add_exp = False
+
+    if should_add_exp and exp and isinstance(exp, dict) and exp.get("title"):
         # Insert before "## Learned Preferences"
         marker = "## Learned Preferences"
         if marker in result:
@@ -238,16 +363,37 @@ def _merge_memory(existing_md: str, extracted: dict[str, Any]) -> str:
     # --- Learned Preferences (append) ---
     learned = extracted.get("learned_preferences")
     if learned and isinstance(learned, list):
-        new_items = "\n".join(f"- {item}" for item in learned if item)
-        if new_items:
-            marker = "## Learned Preferences"
-            # Find the section and append after existing items
-            if marker in result:
-                # Find end of section (next ## or end of file)
-                idx = result.index(marker) + len(marker)
-                result = result[:idx] + "\n" + new_items + result[idx:]
-            else:
-                result = result.rstrip() + f"\n\n{marker}\n{new_items}\n"
+        marker = "## Learned Preferences"
+        start, end = _section_bounds(result, marker)
+        if start is None or end is None:
+            result = _ensure_section(result, marker, "- (none yet)")
+            start, end = _section_bounds(result, marker)
+
+        if start is not None and end is not None:
+            section = result[start:end]
+            section_lines = [
+                line for line in section.splitlines()
+                if line.strip() and line.strip() not in {"- (none yet)", "- (none)"}
+            ]
+            existing_items = {
+                _normalize_item(line[2:])
+                for line in section_lines
+                if line.strip().startswith("- ")
+            }
+            new_lines = []
+            for item in learned:
+                if not item:
+                    continue
+                normalized = _normalize_item(str(item))
+                if normalized in existing_items:
+                    continue
+                existing_items.add(normalized)
+                new_lines.append(f"- {item}")
+
+            if new_lines:
+                section_lines.extend(new_lines)
+                rebuilt = "\n" + "\n".join(section_lines).strip("\n") + "\n"
+                result = result[:start] + rebuilt + result[end:]
 
     return result
 
@@ -270,6 +416,8 @@ class EvoMemoryMiddleware(AgentMiddleware):
             Defaults to ``("messages", 20)``.
     """
 
+    state_schema = EvoMemoryState
+
     def __init__(
         self,
         *,
@@ -282,7 +430,7 @@ class EvoMemoryMiddleware(AgentMiddleware):
         self._memory_path = memory_path
         self._extraction_model = extraction_model
         self._trigger = trigger
-        self._last_extraction_at: int = 0  # message count at last extraction
+        self._last_extraction_at: dict[str, int] = {}  # message count per thread
 
     # -- backend resolution --------------------------------------------------
 
@@ -303,6 +451,34 @@ class EvoMemoryMiddleware(AgentMiddleware):
             )
             return self._backend(tool_runtime)
         return self._backend
+
+    # -- agent-level preload -------------------------------------------------
+
+    def before_agent(
+        self,
+        state: AgentState[Any],
+        runtime: Runtime,
+        config: RunnableConfig,
+    ) -> dict[str, Any] | None:
+        if state.get(_STATE_MEMORY_KEY) is not None:
+            return None
+        backend = self._get_backend(state, runtime)
+        memory = self._read_memory(backend)
+        _CURRENT_MEMORY.set(memory)
+        return {_STATE_MEMORY_KEY: memory}
+
+    async def abefore_agent(
+        self,
+        state: AgentState[Any],
+        runtime: Runtime,
+        config: RunnableConfig,
+    ) -> dict[str, Any] | None:
+        if state.get(_STATE_MEMORY_KEY) is not None:
+            return None
+        backend = self._get_backend(state, runtime)
+        memory = await self._aread_memory(backend)
+        _CURRENT_MEMORY.set(memory)
+        return {_STATE_MEMORY_KEY: memory}
 
     # -- read / write helpers ------------------------------------------------
 
@@ -350,7 +526,7 @@ class EvoMemoryMiddleware(AgentMiddleware):
 
     # -- threshold check -----------------------------------------------------
 
-    def _should_extract(self, messages: list[AnyMessage]) -> bool:
+    def _should_extract(self, thread_id: str, messages: list[AnyMessage]) -> bool:
         """Check if we should run automatic extraction."""
         if self._extraction_model is None:
             return False
@@ -358,7 +534,8 @@ class EvoMemoryMiddleware(AgentMiddleware):
         trigger_type, trigger_value = self._trigger
         if trigger_type == "messages":
             human_count = sum(1 for m in messages if isinstance(m, HumanMessage))
-            return (human_count - self._last_extraction_at) >= trigger_value
+            last = self._last_extraction_at.get(thread_id, 0)
+            return (human_count - last) >= trigger_value
         return False
 
     # -- extraction ----------------------------------------------------------
@@ -371,7 +548,12 @@ class EvoMemoryMiddleware(AgentMiddleware):
         recent = messages[-30:]
         conv_parts = []
         for msg in recent:
-            role = "user" if isinstance(msg, HumanMessage) else "assistant"
+            if isinstance(msg, HumanMessage):
+                role = "user"
+            elif isinstance(msg, AIMessage):
+                role = "assistant"
+            else:
+                continue
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             conv_parts.append(f"[{role}]: {content}")
         conversation = "\n".join(conv_parts)
@@ -399,7 +581,12 @@ class EvoMemoryMiddleware(AgentMiddleware):
         recent = messages[-30:]
         conv_parts = []
         for msg in recent:
-            role = "user" if isinstance(msg, HumanMessage) else "assistant"
+            if isinstance(msg, HumanMessage):
+                role = "user"
+            elif isinstance(msg, AIMessage):
+                role = "assistant"
+            else:
+                continue
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             conv_parts.append(f"[{role}]: {content}")
         conversation = "\n".join(conv_parts)
@@ -428,7 +615,17 @@ class EvoMemoryMiddleware(AgentMiddleware):
         Always injects ``<memory_instructions>`` so the agent knows it can
         save memories, even when MEMORY.md does not exist yet.
         """
-        memory_content = getattr(self, "_current_memory", "")
+        state = request.state or {}
+        memory_content = state.get(_STATE_MEMORY_KEY, "")
+        if not memory_content:
+            memory_content = _CURRENT_MEMORY.get()
+        if not memory_content and request.runtime is not None:
+            try:
+                backend = self._get_backend(state, request.runtime)
+                memory_content = self._read_memory(backend)
+                _CURRENT_MEMORY.set(memory_content)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Failed to load memory during modify_request: %s", e)
         # Use placeholder when memory file doesn't exist yet
         if not memory_content:
             memory_content = "(No memory saved yet. Create /memory/MEMORY.md when you learn important information.)"
@@ -463,24 +660,29 @@ class EvoMemoryMiddleware(AgentMiddleware):
         """Read memory and optionally run extraction before each LLM call."""
         backend = self._get_backend(state, runtime)
         messages = state["messages"]
+        thread_id = _get_thread_id(runtime)
 
         # Always read memory for injection
         memory = self._read_memory(backend)
-        self._current_memory = memory
+        _CURRENT_MEMORY.set(memory)
+        state_update: dict[str, Any] | None = None
+        if state.get(_STATE_MEMORY_KEY) != memory:
+            state_update = {_STATE_MEMORY_KEY: memory}
 
         # Check extraction threshold
-        if self._should_extract(messages):
+        if self._should_extract(thread_id, messages):
             human_count = sum(1 for m in messages if isinstance(m, HumanMessage))
             extracted = self._extract(self._extraction_model, memory, messages)
             if extracted:
                 new_memory = _merge_memory(memory, extracted)
                 if new_memory != memory:
                     self._write_memory(backend, memory, new_memory)
-                    self._current_memory = new_memory
+                    _CURRENT_MEMORY.set(new_memory)
                     logger.info("Auto-extracted and updated memory")
-            self._last_extraction_at = human_count
+                    state_update = {_STATE_MEMORY_KEY: new_memory}
+            self._last_extraction_at[thread_id] = human_count
 
-        return None
+        return state_update
 
     async def abefore_model(
         self,
@@ -490,19 +692,24 @@ class EvoMemoryMiddleware(AgentMiddleware):
         """Async: Read memory and optionally run extraction."""
         backend = self._get_backend(state, runtime)
         messages = state["messages"]
+        thread_id = _get_thread_id(runtime)
 
         memory = await self._aread_memory(backend)
-        self._current_memory = memory
+        _CURRENT_MEMORY.set(memory)
+        state_update: dict[str, Any] | None = None
+        if state.get(_STATE_MEMORY_KEY) != memory:
+            state_update = {_STATE_MEMORY_KEY: memory}
 
-        if self._should_extract(messages):
+        if self._should_extract(thread_id, messages):
             human_count = sum(1 for m in messages if isinstance(m, HumanMessage))
             extracted = await self._aextract(self._extraction_model, memory, messages)
             if extracted:
                 new_memory = _merge_memory(memory, extracted)
                 if new_memory != memory:
                     await self._awrite_memory(backend, memory, new_memory)
-                    self._current_memory = new_memory
+                    _CURRENT_MEMORY.set(new_memory)
                     logger.info("Auto-extracted and updated memory")
-            self._last_extraction_at = human_count
+                    state_update = {_STATE_MEMORY_KEY: new_memory}
+            self._last_extraction_at[thread_id] = human_count
 
-        return None
+        return state_update

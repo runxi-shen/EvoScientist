@@ -77,7 +77,7 @@ else:
         virtual_mode=True,
     )
 
-# Skills backend: merge user-installed (workspace) and system (package) skills
+# Skills backend: merge user-installed (./skills/) and system (package) skills
 _skills_backend = MergedReadOnlyBackend(
     primary_dir="./skills/",                             # user-installed, takes priority
     secondary_dir=SKILLS_DIR,                           # package built-in, fallback
