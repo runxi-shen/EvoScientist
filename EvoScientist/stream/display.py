@@ -550,6 +550,29 @@ def display_final_results(
 # Async-to-sync bridge
 # ---------------------------------------------------------------------------
 
+def _create_event_loop() -> asyncio.AbstractEventLoop:
+    """Create and set the event loop for asyncio.
+
+    Returns:
+        The created event loop.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop
+
+def _get_event_loop() -> asyncio.AbstractEventLoop:
+    """Get the event loop for asyncio.
+
+    If no event loop is set, a new one is created.
+
+    Returns:
+        The current event loop.
+    """
+    loop = asyncio.get_event_loop()
+    if loop.is_closed():
+        loop = _create_event_loop()
+    return loop
+
 def _run_streaming(
     agent: Any,
     message: str,
@@ -587,7 +610,12 @@ def _run_streaming(
 
     with Live(console=console, refresh_per_second=10, transient=True) as live:
         live.update(create_streaming_display(is_waiting=True))
-        asyncio.run(_consume())
+        try:
+            loop = _get_event_loop()
+        except RuntimeError:
+            # No current event loop
+            loop = _create_event_loop()
+        loop.run_until_complete(_consume())
 
     if interactive:
         display_final_results(
