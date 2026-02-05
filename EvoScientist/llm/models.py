@@ -23,6 +23,12 @@ MODELS: dict[str, tuple[str, str]] = {
     "gpt-4o-mini": ("gpt-4o-mini", "openai"),
     "o1": ("o1", "openai"),
     "o1-mini": ("o1-mini", "openai"),
+    # Google GenAI
+    "gemini-3-pro": ("gemini-3-pro-preview", "google-genai"),
+    "gemini-3-flash": ("gemini-3-flash-preview", "google-genai"),
+    "gemini-2.5-flash": ("gemini-2.5-flash", "google-genai"),
+    "gemini-2.5-flash-lite": ("gemini-2.5-flash-lite", "google-genai"),
+    "gemini-2.5-pro": ("gemini-2.5-pro", "google-genai"),
     # NVIDIA
     "glm4.7": ("z-ai/glm4.7", "nvidia"),
     "deepseek-v3.1": ("deepseek-ai/deepseek-v3.1-terminus", "nvidia"),
@@ -70,6 +76,8 @@ def get_chat_model(
                 provider = "anthropic"
             elif model_id.startswith(("gpt-", "o1", "davinci", "text-")):
                 provider = "openai"
+            elif model_id.startswith("gemini"):
+                provider = "google-genai"
             elif "/" in model_id:
                 provider = "nvidia"
             else:

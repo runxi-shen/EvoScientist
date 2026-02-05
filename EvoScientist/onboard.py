@@ -172,6 +172,31 @@ def validate_nvidia_key(api_key: str) -> tuple[bool, str]:
         return False, f"Error: {e}"
 
 
+def validate_google_key(api_key: str) -> tuple[bool, str]:
+    """Validate a Google GenAI API key by making a test request.
+
+    Args:
+        api_key: The API key to validate.
+
+    Returns:
+        Tuple of (is_valid, message).
+    """
+    if not api_key:
+        return True, "Skipped (no key provided)"
+
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        # Make a minimal request to validate the key
+        list(client.models.list(config={"page_size": 1}))
+        return True, "Valid"
+    except Exception as e:
+        error_str = str(e).lower()
+        if "401" in error_str or "403" in error_str or "unauthorized" in error_str or "invalid" in error_str or "api key" in error_str:
+            return False, "Invalid API key"
+        return False, f"Error: {e}"
+
+
 def validate_tavily_key(api_key: str) -> tuple[bool, str]:
     """Validate a Tavily API key by making a test request.
 
@@ -253,11 +278,12 @@ def _step_provider(config: EvoScientistConfig) -> str:
     choices = [
         Choice(title="Anthropic (Claude models)", value="anthropic"),
         Choice(title="OpenAI (GPT models)", value="openai"),
+        Choice(title="Google GenAI (Gemini models)", value="google-genai"),
         Choice(title="NVIDIA (GLM, MiniMax, Kimi, etc.)", value="nvidia"),
     ]
 
     # Set default based on current config
-    default = config.provider if config.provider in ["anthropic", "openai", "nvidia"] else "anthropic"
+    default = config.provider if config.provider in ["anthropic", "openai", "google-genai", "nvidia"] else "anthropic"
 
     provider = questionary.select(
         "Select your LLM provider:",
@@ -296,6 +322,10 @@ def _step_provider_api_key(
         key_name = "NVIDIA"
         current = config.nvidia_api_key or os.environ.get("NVIDIA_API_KEY", "")
         validate_fn = validate_nvidia_key
+    elif provider == "google-genai":
+        key_name = "Google"
+        current = config.google_api_key or os.environ.get("GOOGLE_API_KEY", "")
+        validate_fn = validate_google_key
     else:
         key_name = "OpenAI"
         current = config.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
@@ -658,6 +688,8 @@ def run_onboard(skip_validation: bool = False) -> bool:
                 config.anthropic_api_key = new_key
             elif provider == "nvidia":
                 config.nvidia_api_key = new_key
+            elif provider == "google-genai":
+                config.google_api_key = new_key
             else:
                 config.openai_api_key = new_key
         else:
@@ -665,6 +697,8 @@ def run_onboard(skip_validation: bool = False) -> bool:
                 current = config.anthropic_api_key
             elif provider == "nvidia":
                 current = config.nvidia_api_key
+            elif provider == "google-genai":
+                current = config.google_api_key
             else:
                 current = config.openai_api_key
             if not current:

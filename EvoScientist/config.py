@@ -46,8 +46,10 @@ class EvoScientistConfig:
     Attributes:
         anthropic_api_key: Anthropic API key for Claude models.
         openai_api_key: OpenAI API key for GPT models.
+        nvidia_api_key: NVIDIA API key for NVIDIA models.
+        google_api_key: Google API key for Gemini models.
         tavily_api_key: Tavily API key for web search.
-        provider: Default LLM provider ('anthropic' or 'openai').
+        provider: Default LLM provider ('anthropic', 'openai', 'google-genai', or 'nvidia').
         model: Default model name (short name or full ID).
         default_mode: Default workspace mode ('daemon' or 'run').
         default_workdir: Default workspace directory (empty = use ./workspace).
@@ -60,6 +62,7 @@ class EvoScientistConfig:
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     nvidia_api_key: str = ""
+    google_api_key: str = ""
     tavily_api_key: str = ""
 
     # LLM Settings
@@ -204,6 +207,7 @@ _ENV_MAPPINGS = {
     "anthropic_api_key": "ANTHROPIC_API_KEY",
     "openai_api_key": "OPENAI_API_KEY",
     "nvidia_api_key": "NVIDIA_API_KEY",
+    "google_api_key": "GOOGLE_API_KEY",
     "tavily_api_key": "TAVILY_API_KEY",
     "default_mode": "EVOSCIENTIST_DEFAULT_MODE",
     "default_workdir": "EVOSCIENTIST_WORKSPACE_DIR",
@@ -270,5 +274,7 @@ def apply_config_to_env(config: EvoScientistConfig) -> None:
         os.environ["OPENAI_API_KEY"] = config.openai_api_key
     if config.nvidia_api_key and not os.environ.get("NVIDIA_API_KEY"):
         os.environ["NVIDIA_API_KEY"] = config.nvidia_api_key
+    if config.google_api_key and not os.environ.get("GOOGLE_API_KEY"):
+        os.environ["GOOGLE_API_KEY"] = config.google_api_key
     if config.tavily_api_key and not os.environ.get("TAVILY_API_KEY"):
         os.environ["TAVILY_API_KEY"] = config.tavily_api_key
