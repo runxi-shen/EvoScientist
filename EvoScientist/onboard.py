@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 import questionary
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator, ValidationError
 from questionary import Choice
@@ -52,6 +53,8 @@ CONFIRM_STYLE = Style.from_dict({
     "instruction": "fg:#858585",
     "text": "",
 })
+
+QMARK = "❯"
 
 STEPS = ["Provider", "API Key", "Model", "Tavily Key", "Workspace", "Parameters", "Skills", "MCP Servers", "Channels"]
 
@@ -296,6 +299,7 @@ def _step_provider(config: EvoScientistConfig) -> str:
         choices=choices,
         default=default,
         style=WIZARD_STYLE,
+        qmark=QMARK,
         use_indicator=True,
     ).ask()
 
@@ -348,6 +352,7 @@ def _step_provider_api_key(
     new_key = questionary.password(
         f"Enter {key_name} API key ({hint}, Enter to keep):",
         style=WIZARD_STYLE,
+        qmark=QMARK,
     ).ask()
 
     if new_key is None:
@@ -377,6 +382,7 @@ def _step_provider_api_key(
                 "Save anyway?",
                 default=False,
                 style=WIZARD_STYLE,
+                qmark=QMARK,
             ).ask()
             if save_anyway is None:
                 raise KeyboardInterrupt()
@@ -410,6 +416,7 @@ def _step_model(config: EvoScientistConfig, provider: str) -> str:
             "Enter model name:",
             default=config.model,
             style=WIZARD_STYLE,
+            qmark=QMARK,
         ).ask()
         if model is None:
             raise KeyboardInterrupt()
@@ -432,6 +439,7 @@ def _step_model(config: EvoScientistConfig, provider: str) -> str:
         choices=choices,
         default=default,
         style=WIZARD_STYLE,
+        qmark=QMARK,
         use_indicator=True,
     ).ask()
 
@@ -467,6 +475,8 @@ def _step_tavily_key(
     new_key = questionary.password(
         f"Tavily API key for web search ({hint}, Enter to keep):",
         style=WIZARD_STYLE,
+        qmark=QMARK,
+        placeholder=FormattedText([("fg:#858585", "(recommended for web search)")]),
     ).ask()
 
     if new_key is None:
@@ -496,6 +506,7 @@ def _step_tavily_key(
                 "Save anyway?",
                 default=False,
                 style=WIZARD_STYLE,
+                qmark=QMARK,
             ).ask()
             if save_anyway is None:
                 raise KeyboardInterrupt()
@@ -532,6 +543,7 @@ def _step_workspace(config: EvoScientistConfig) -> tuple[str, str]:
         choices=mode_choices,
         default=config.default_mode,
         style=WIZARD_STYLE,
+        qmark=QMARK,
         use_indicator=True,
     ).ask()
 
@@ -543,6 +555,7 @@ def _step_workspace(config: EvoScientistConfig) -> tuple[str, str]:
         "Use custom workspace directory? (default: ./workspace/)",
         default=bool(config.default_workdir),
         style=WIZARD_STYLE,
+        qmark=QMARK,
     ).ask()
 
     if use_custom is None:
@@ -554,6 +567,7 @@ def _step_workspace(config: EvoScientistConfig) -> tuple[str, str]:
             "Workspace directory path:",
             default=config.default_workdir or "",
             style=WIZARD_STYLE,
+            qmark=QMARK,
         ).ask()
         if workdir is None:
             raise KeyboardInterrupt()
@@ -576,6 +590,7 @@ def _step_parameters(config: EvoScientistConfig) -> tuple[int, int, bool]:
         "Max concurrent sub-agents (1-10):",
         default=str(config.max_concurrent),
         style=WIZARD_STYLE,
+        qmark=QMARK,
         validate=lambda x: x.strip() == "" or (x.strip().isdigit() and 1 <= int(x.strip()) <= 10),
     ).ask()
 
@@ -589,6 +604,7 @@ def _step_parameters(config: EvoScientistConfig) -> tuple[int, int, bool]:
         "Max delegation iterations (1-10):",
         default=str(config.max_iterations),
         style=WIZARD_STYLE,
+        qmark=QMARK,
         validate=lambda x: x.strip() == "" or (x.strip().isdigit() and 1 <= int(x.strip()) <= 10),
     ).ask()
 
@@ -608,6 +624,7 @@ def _step_parameters(config: EvoScientistConfig) -> tuple[int, int, bool]:
         choices=thinking_choices,
         default=config.show_thinking,
         style=WIZARD_STYLE,
+        qmark=QMARK,
         use_indicator=True,
     ).ask()
 
@@ -752,6 +769,7 @@ def _step_skills() -> list[str]:
         "Install predefined skills:",
         choices=choices,
         style=WIZARD_STYLE,
+        qmark=QMARK,
     ).ask()
 
     if selected is None:
@@ -776,6 +794,7 @@ def _step_skills() -> list[str]:
                     f"Install Node.js via {method}? ({command})",
                     default=True,
                     style=WIZARD_STYLE,
+                    qmark=QMARK,
                 ).ask()
 
                 if install_node is None:
@@ -899,6 +918,7 @@ def _step_mcp_servers() -> list[str]:
         "Install recommended MCP servers:",
         choices=choices,
         style=WIZARD_STYLE,
+        qmark=QMARK,
     ).ask()
 
     if selected is None:
@@ -1048,7 +1068,7 @@ def _setup_imessage() -> bool:
             "Install imsg via Homebrew? (brew install steipete/tap/imsg)",
             default=True,
             style=WIZARD_STYLE,
-            qmark="  ?",
+            qmark=f"  {QMARK}",
         ).ask()
 
         if install is None:
@@ -1105,6 +1125,7 @@ def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
         choices=choices,
         default=default,
         style=WIZARD_STYLE,
+        qmark=QMARK,
         use_indicator=True,
     ).ask()
 
@@ -1124,7 +1145,7 @@ def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
             "Enable iMessage anyway? (will try to connect on startup)",
             default=False,
             style=WIZARD_STYLE,
-            qmark="  ?",
+            qmark=f"  {QMARK}",
         ).ask()
         if enable_anyway is None:
             raise KeyboardInterrupt()
@@ -1136,7 +1157,7 @@ def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
         "Allowed senders (comma-separated, empty = all):",
         default=config.imessage_allowed_senders,
         style=WIZARD_STYLE,
-        qmark="  ?",
+        qmark=f"  {QMARK}",
     ).ask()
 
     if senders is None:
@@ -1278,7 +1299,7 @@ def run_onboard(skip_validation: bool = False) -> bool:
             "Save this configuration?",
             default=True,
             style=CONFIRM_STYLE,
-            qmark="!",
+            qmark=QMARK,
         ).ask()
 
         if save is None:
