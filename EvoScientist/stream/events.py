@@ -12,6 +12,52 @@ from .emitter import StreamEventEmitter
 from .tracker import ToolCallTracker
 from .utils import DisplayLimits, is_success
 
+# Image media types returned by DeepAgents read_file
+_IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/svg+xml"}
+
+
+def _extract_tool_content(msg) -> tuple[str, bool]:
+    """Extract display-safe content from a ToolMessage.
+
+    DeepAgents ``read_file`` returns image content as
+    ``ToolMessage(content=[ImageContentBlock])`` with
+    ``additional_kwargs["read_file_media_type"]`` set.
+    Stringifying that would dump huge base64 data into the display.
+
+    Returns:
+        (content_string, is_image) — a short summary for images,
+        or the raw string content for normal results.
+    """
+    additional = getattr(msg, "additional_kwargs", None) or {}
+    media_type = additional.get("read_file_media_type", "")
+    if media_type and media_type in _IMAGE_MEDIA_TYPES:
+        # Extract path from the tool call args if available
+        file_path = additional.get("read_file_path", "")
+        if not file_path:
+            file_path = getattr(msg, "name", "image")
+        return f"[OK] Image displayed: {file_path} ({media_type})", True
+
+    content = getattr(msg, "content", "")
+    # Guard against list-type content (image content blocks without metadata)
+    if isinstance(content, list):
+        # Check if any block looks like image data
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "image" or "base64" in block:
+                    return "[OK] Image displayed", True
+        # Non-image list content — join text blocks
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text", "")
+                if text:
+                    parts.append(text)
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts) if parts else str(content), False
+
+    return str(content), False
+
 
 async def stream_agent_events(agent: Any, message: str, thread_id: str) -> AsyncIterator[dict]:
     """Stream events from the agent graph using async iteration.
@@ -281,7 +327,7 @@ async def stream_agent_events(agent: Any, message: str, thread_id: str) -> Async
                                 info.id,
                             ).data
                     name = getattr(msg, "name", "unknown")
-                    raw_content = str(getattr(msg, "content", ""))
+                    raw_content, _is_img = _extract_tool_content(msg)
                     content = raw_content[:DisplayLimits.TOOL_RESULT_MAX]
                     success = is_success(content)
                     yield emitter.subagent_tool_result(subagent, name, content, success).data
@@ -406,7 +452,7 @@ def _process_tool_result(chunk, emitter: StreamEventEmitter, tracker: ToolCallTr
         yield emitter.tool_call(info.name, info.args, info.id)
 
     name = getattr(chunk, "name", "unknown")
-    raw_content = str(getattr(chunk, "content", ""))
+    raw_content, _is_img = _extract_tool_content(chunk)
     content = raw_content[:DisplayLimits.TOOL_RESULT_MAX]
     if len(raw_content) > DisplayLimits.TOOL_RESULT_MAX:
         content += "\n... (truncated)"

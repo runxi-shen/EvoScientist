@@ -36,7 +36,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # Tools
     "tavily_search": (".tools", "tavily_search"),
     "think_tool": (".tools", "think_tool"),
-    "view_image": (".tools", "view_image"),
+
 }
 
 

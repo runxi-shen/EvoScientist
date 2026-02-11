@@ -1084,7 +1084,7 @@ def _setup_imessage() -> bool:
         return False
 
 
-def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
+def _step_channels(config: EvoScientistConfig) -> tuple[bool, str, bool]:
     """Step 7: Select a channel to enable on startup.
 
     Presents a single-select list with "Skip for now" as default.
@@ -1094,7 +1094,7 @@ def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
         config: Current configuration.
 
     Returns:
-        Tuple of (imessage_enabled, imessage_allowed_senders_csv).
+        Tuple of (imessage_enabled, imessage_allowed_senders_csv, imessage_send_thinking).
     """
     # Determine default based on current config
     default = "imessage" if config.imessage_enabled else "skip"
@@ -1120,7 +1120,7 @@ def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
         raise KeyboardInterrupt()
 
     if selected == "skip":
-        return False, ""
+        return False, "", True
 
     # iMessage selected — run guided setup
     ready = _setup_imessage()
@@ -1137,7 +1137,7 @@ def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
         if enable_anyway is None:
             raise KeyboardInterrupt()
         if not enable_anyway:
-            return False, ""
+            return False, "", True
 
     # Ask for allowed senders (indented to align with ✓ status lines)
     senders = questionary.text(
@@ -1150,7 +1150,25 @@ def _step_channels(config: EvoScientistConfig) -> tuple[bool, str]:
     if senders is None:
         raise KeyboardInterrupt()
 
-    return True, senders.strip()
+    # Ask whether to forward thinking content to channel
+    thinking_choices = [
+        Choice(title="On (forward model reasoning)", value=True),
+        Choice(title="Off (only send final responses)", value=False),
+    ]
+
+    send_thinking = questionary.select(
+        "Send thinking panel in channel?",
+        choices=thinking_choices,
+        default=config.imessage_send_thinking,
+        style=WIZARD_STYLE,
+        qmark=f"  {QMARK}",
+        use_indicator=True,
+    ).ask()
+
+    if send_thinking is None:
+        raise KeyboardInterrupt()
+
+    return True, senders.strip(), send_thinking
 
 
 # =============================================================================
@@ -1276,9 +1294,10 @@ def run_onboard(skip_validation: bool = False) -> bool:
         _step_mcp_servers()
 
         # Step 9: Channels
-        imessage_enabled, imessage_allowed_senders = _step_channels(config)
+        imessage_enabled, imessage_allowed_senders, imessage_send_thinking = _step_channels(config)
         config.imessage_enabled = imessage_enabled
         config.imessage_allowed_senders = imessage_allowed_senders
+        config.imessage_send_thinking = imessage_send_thinking
 
         # Confirm save
         console.print()

@@ -235,7 +235,7 @@ The channel can also be started manually with `/channel` in the interactive CLI.
 
 **Features:**
 - Thinking content and todo lists are forwarded to iMessage as intermediate messages
-- Media files (images, PDFs) are auto-sent when the agent writes (`write_file`) or views (`view_image`) them — no extra commands needed
+- Media files (images, PDFs) are auto-sent when the agent writes (`write_file`) or reads (`read_file`) them — no extra commands needed
 
 ### Runtime Directories
 

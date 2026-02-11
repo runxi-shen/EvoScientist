@@ -425,6 +425,7 @@ def _main_callback(
             provider=config.provider,
             imessage_enabled=config.imessage_enabled,
             imessage_allowed_senders=config.imessage_allowed_senders,
+            imessage_send_thinking=config.imessage_send_thinking,
             run_name=name,
         )
 

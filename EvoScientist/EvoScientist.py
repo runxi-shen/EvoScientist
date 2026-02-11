@@ -26,7 +26,7 @@ from .mcp import load_mcp_tools
 from .middleware import create_skills_middleware, create_memory_middleware
 from .prompts import RESEARCHER_INSTRUCTIONS, get_system_prompt
 from .utils import load_subagents
-from .tools import tavily_search, think_tool, skill_manager, view_image
+from .tools import tavily_search, think_tool, skill_manager
 from .paths import (
     ensure_dirs,
     default_workspace_dir,
@@ -115,11 +115,10 @@ backend = CompositeBackend(
 tool_registry = {
     "think_tool": think_tool,
     "tavily_search": tavily_search,
-    "view_image": view_image,
 }
 
 # Base tools that every agent variant gets (before MCP)
-BASE_TOOLS = [think_tool, skill_manager, view_image]
+BASE_TOOLS = [think_tool, skill_manager]
 
 
 def _build_base_kwargs(base_backend, base_middleware):

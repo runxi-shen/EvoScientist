@@ -660,22 +660,24 @@ def _run_streaming(
                         if os.path.isfile(real_path):
                             on_file_write(real_path)
 
-            # Send media file to channel when view_image succeeds
+            # Send media file to channel when read_file returns an image
             if (on_file_write
                     and event_type == "tool_result"
-                    and event.get("name") == "view_image"
+                    and event.get("name") == "read_file"
                     and event.get("success")):
-                vi_path = ""
+                rf_path = ""
                 for tc in reversed(state.tool_calls):
-                    if tc.get("name") == "view_image":
-                        vi_path = tc.get("args", {}).get("image_path", "")
+                    if tc.get("name") == "read_file":
+                        rf_path = tc.get("args", {}).get("file_path", "") or tc.get("args", {}).get("path", "")
                         break
-                if vi_path:
-                    real_path = vi_path
-                    if not os.path.isfile(real_path):
-                        real_path = str(resolve_virtual_path(vi_path))
-                    if os.path.isfile(real_path):
-                        on_file_write(real_path)
+                if rf_path:
+                    ext = os.path.splitext(rf_path)[1].lower()
+                    if ext in _MEDIA_EXTENSIONS:
+                        real_path = rf_path
+                        if not os.path.isfile(real_path):
+                            real_path = str(resolve_virtual_path(rf_path))
+                        if os.path.isfile(real_path):
+                            on_file_write(real_path)
 
             live.update(create_streaming_display(
                 **state.get_display_args(),

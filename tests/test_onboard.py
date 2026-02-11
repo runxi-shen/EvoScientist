@@ -498,7 +498,7 @@ class TestStepChannels:
             mock_q.select.return_value.ask.return_value = "skip"
             result = _step_channels(config)
 
-        assert result == (False, "")
+        assert result == (False, "", True)
 
     def test_returns_enabled_when_setup_passes(self):
         """Test channels step returns enabled when setup succeeds."""
@@ -506,13 +506,18 @@ class TestStepChannels:
 
         config = EvoScientistConfig()
 
+        select_mock_1 = mock.MagicMock()
+        select_mock_1.ask.return_value = "imessage"
+        select_mock_2 = mock.MagicMock()
+        select_mock_2.ask.return_value = True
+
         with mock.patch("EvoScientist.onboard.questionary") as mock_q, \
              mock.patch("EvoScientist.onboard._setup_imessage", return_value=True):
-            mock_q.select.return_value.ask.return_value = "imessage"
+            mock_q.select.side_effect = [select_mock_1, select_mock_2]
             mock_q.text.return_value.ask.return_value = ""
             result = _step_channels(config)
 
-        assert result == (True, "")
+        assert result == (True, "", True)
 
     def test_returns_enabled_with_senders(self):
         """Test channels step returns enabled with specific senders."""
@@ -520,13 +525,18 @@ class TestStepChannels:
 
         config = EvoScientistConfig()
 
+        select_mock_1 = mock.MagicMock()
+        select_mock_1.ask.return_value = "imessage"
+        select_mock_2 = mock.MagicMock()
+        select_mock_2.ask.return_value = False
+
         with mock.patch("EvoScientist.onboard.questionary") as mock_q, \
              mock.patch("EvoScientist.onboard._setup_imessage", return_value=True):
-            mock_q.select.return_value.ask.return_value = "imessage"
+            mock_q.select.side_effect = [select_mock_1, select_mock_2]
             mock_q.text.return_value.ask.return_value = "+1234567890,+0987654321"
             result = _step_channels(config)
 
-        assert result == (True, "+1234567890,+0987654321")
+        assert result == (True, "+1234567890,+0987654321", False)
 
     def test_setup_fails_user_declines(self):
         """Test channels step returns disabled when setup fails and user declines."""
@@ -540,7 +550,7 @@ class TestStepChannels:
             mock_q.confirm.return_value.ask.return_value = False
             result = _step_channels(config)
 
-        assert result == (False, "")
+        assert result == (False, "", True)
 
     def test_setup_fails_user_enables_anyway(self):
         """Test channels step enables when setup fails but user confirms."""
@@ -548,14 +558,19 @@ class TestStepChannels:
 
         config = EvoScientistConfig()
 
+        select_mock_1 = mock.MagicMock()
+        select_mock_1.ask.return_value = "imessage"
+        select_mock_2 = mock.MagicMock()
+        select_mock_2.ask.return_value = True
+
         with mock.patch("EvoScientist.onboard.questionary") as mock_q, \
              mock.patch("EvoScientist.onboard._setup_imessage", return_value=False):
-            mock_q.select.return_value.ask.return_value = "imessage"
+            mock_q.select.side_effect = [select_mock_1, select_mock_2]
             mock_q.confirm.return_value.ask.return_value = True
             mock_q.text.return_value.ask.return_value = ""
             result = _step_channels(config)
 
-        assert result == (True, "")
+        assert result == (True, "", True)
 
     def test_raises_keyboard_interrupt_on_cancel(self):
         """Test channels step raises KeyboardInterrupt on cancel."""

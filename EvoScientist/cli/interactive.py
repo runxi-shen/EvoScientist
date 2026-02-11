@@ -143,6 +143,7 @@ def cmd_interactive(
     provider: str | None = None,
     imessage_enabled: bool = False,
     imessage_allowed_senders: str = "",
+    imessage_send_thinking: bool = True,
     run_name: str | None = None,
 ) -> None:
     """Interactive conversation mode with streaming output.
@@ -157,6 +158,7 @@ def cmd_interactive(
         provider: LLM provider name to display in banner
         imessage_enabled: Whether to auto-start iMessage channel
         imessage_allowed_senders: Comma-separated allowed senders
+        imessage_send_thinking: Whether to forward thinking to channel
         run_name: Optional run name for /new session deduplication
     """
     import nest_asyncio
@@ -296,7 +298,7 @@ def cmd_interactive(
 
         # Auto-start iMessage channel if enabled in config
         if imessage_enabled and not _ChannelState.is_running():
-            _auto_start_channel(state["agent"], state["thread_id"], imessage_allowed_senders)
+            _auto_start_channel(state["agent"], state["thread_id"], imessage_allowed_senders, imessage_send_thinking)
 
         try:
             _print_separator()

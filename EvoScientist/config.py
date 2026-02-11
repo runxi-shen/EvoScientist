@@ -83,6 +83,7 @@ class EvoScientistConfig:
     # Channel Settings
     imessage_enabled: bool = False
     imessage_allowed_senders: str = ""  # comma-separated, empty = allow all
+    imessage_send_thinking: bool = True  # forward thinking to channel
 
 
 # =============================================================================

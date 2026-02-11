@@ -190,10 +190,14 @@ def _cmd_channel(args: str, agent: Any, thread_id: str) -> None:
     _ChannelState.agent = agent
     _ChannelState.thread_id = thread_id
 
+    # Read send_thinking preference from config
+    from ..config import load_config as _load_config
+    send_thinking = _load_config().imessage_send_thinking
+
     server = IMessageServer(
         config,
         handler=_create_channel_handler(),
-        send_thinking=True,
+        send_thinking=send_thinking,
     )
 
     _ChannelState.server = server
@@ -248,13 +252,14 @@ def _print_channel_panel(channels: list[tuple[str, bool, str]]) -> None:
     console.print()
 
 
-def _auto_start_channel(agent: Any, thread_id: str, allowed_senders_csv: str) -> None:
+def _auto_start_channel(agent: Any, thread_id: str, allowed_senders_csv: str, send_thinking: bool = True) -> None:
     """Start iMessage channel automatically from config.
 
     Args:
         agent: Compiled agent graph.
         thread_id: Current thread ID.
         allowed_senders_csv: Comma-separated allowed senders (empty = all).
+        send_thinking: Whether to forward thinking content to channel.
     """
     try:
         from ..channels.imessage import IMessageConfig
@@ -269,7 +274,7 @@ def _auto_start_channel(agent: Any, thread_id: str, allowed_senders_csv: str) ->
         _ChannelState.agent = agent
         _ChannelState.thread_id = thread_id
 
-        server = IMessageServer(config, handler=_create_channel_handler(), send_thinking=True)
+        server = IMessageServer(config, handler=_create_channel_handler(), send_thinking=send_thinking)
         _ChannelState.server = server
         _ChannelState.thread = threading.Thread(
             target=_run_channel_thread,
