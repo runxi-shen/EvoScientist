@@ -564,11 +564,29 @@ class EvoMemoryMiddleware(AgentMiddleware):
             conversation="\n".join(conv_parts),
         )
 
+    @staticmethod
+    def _disable_thinking(model: BaseChatModel) -> BaseChatModel:
+        """Return a copy of the model with thinking/reasoning disabled.
+
+        Anthropic's API does not allow extended thinking when tool_choice
+        forces tool use (as with_structured_output does).  Similarly,
+        OpenAI reasoning can conflict.  Strip these settings so extraction
+        works reliably.
+        """
+        rebind: dict[str, Any] = {}
+        model_kwargs = getattr(model, "model_kwargs", {}) or {}
+        if getattr(model, "thinking", None) or "thinking" in model_kwargs:
+            rebind["thinking"] = {"type": "disabled"}
+        if getattr(model, "reasoning", None) or "reasoning" in model_kwargs:
+            rebind["reasoning"] = None
+        return model.bind(**rebind) if rebind else model
+
     def _extract(self, model: BaseChatModel, memory: str, messages: list[AnyMessage]) -> dict[str, Any]:
         """Run LLM extraction on recent messages using structured output."""
         prompt = self._build_extraction_prompt(memory, messages)
         try:
-            structured_model = model.with_structured_output(ExtractedMemory)
+            plain_model = self._disable_thinking(model)
+            structured_model = plain_model.with_structured_output(ExtractedMemory)
             result = structured_model.invoke(prompt)
             return result.model_dump(exclude_none=True)
         except Exception as e:  # noqa: BLE001
@@ -579,7 +597,8 @@ class EvoMemoryMiddleware(AgentMiddleware):
         """Async: Run LLM extraction on recent messages using structured output."""
         prompt = self._build_extraction_prompt(memory, messages)
         try:
-            structured_model = model.with_structured_output(ExtractedMemory)
+            plain_model = self._disable_thinking(model)
+            structured_model = plain_model.with_structured_output(ExtractedMemory)
             result = await structured_model.ainvoke(prompt)
             return result.model_dump(exclude_none=True)
         except Exception as e:  # noqa: BLE001

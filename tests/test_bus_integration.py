@@ -1,7 +1,11 @@
-"""Tests for bus-mode agent integration (_bus_inbound_consumer)."""
+"""Tests for bus-mode queue bridge (_bus_inbound_consumer).
+
+The consumer no longer calls the agent directly.  Instead it enqueues a
+``ChannelMessage`` on a thread-safe queue and waits for the main CLI
+thread to set a response via ``_set_channel_response()``.
+"""
 
 import asyncio
-
 
 from EvoScientist.channels.bus.events import InboundMessage
 from EvoScientist.channels.bus.message_bus import MessageBus
@@ -16,6 +20,15 @@ def _run(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+
+def _drain_queue(q):
+    """Drain a queue.Queue before a test to avoid cross-test leaks."""
+    while not q.empty():
+        try:
+            q.get_nowait()
+        except Exception:
+            break
 
 
 class _FakeConfig:
@@ -56,37 +69,17 @@ class FakeChannel(Channel):
         pass
 
 
-def _mock_stream_events(content, reply):
-    """Create a mock stream_agent_events that yields text then done."""
-    async def _stream(agent, message, thread_id):
-        yield {"type": "text", "content": reply}
-        yield {"type": "done", "response": reply}
-    return _stream
-
-
-def _mock_stream_events_error(error_msg):
-    """Create a mock stream_agent_events that raises."""
-    async def _stream(agent, message, thread_id):
-        raise RuntimeError(error_msg)
-        yield  # make it an async generator  # pragma: no cover
-    return _stream
-
-
-def _mock_stream_events_with_thinking(thinking_text, reply):
-    """Create a mock stream_agent_events that yields thinking then done."""
-    async def _stream(agent, message, thread_id):
-        yield {"type": "thinking", "content": thinking_text}
-        yield {"type": "text", "content": reply}
-        yield {"type": "done", "content": reply}
-    return _stream
-
-
 class TestBusInboundConsumer:
-    """Test the _bus_inbound_consumer bridge function."""
+    """Test the _bus_inbound_consumer queue bridge."""
 
     def test_processes_inbound_and_publishes_outbound(self):
-        """InboundMessage -> agent -> OutboundMessage flow."""
-        from EvoScientist.cli.channel import _bus_inbound_consumer
+        """InboundMessage -> queue -> response -> OutboundMessage flow."""
+        from EvoScientist.cli.channel import (
+            _bus_inbound_consumer,
+            _message_queue,
+            _set_channel_response,
+        )
+        _drain_queue(_message_queue)
 
         async def _test():
             bus = MessageBus()
@@ -94,48 +87,54 @@ class TestBusInboundConsumer:
             ch = FakeChannel()
             manager.register(ch)
 
-            mock_stream = _mock_stream_events(
-                "hello agent", "Reply to: hello agent",
+            consumer = asyncio.create_task(
+                _bus_inbound_consumer(bus, manager, False)
             )
 
-            import EvoScientist.stream.events as events_mod
-            original = events_mod.stream_agent_events
-            events_mod.stream_agent_events = mock_stream
+            await bus.publish_inbound(InboundMessage(
+                channel="fake",
+                sender_id="user1",
+                chat_id="chat1",
+                content="hello agent",
+            ))
 
+            # Wait for consumer to enqueue the message
+            for _ in range(20):
+                if not _message_queue.empty():
+                    break
+                await asyncio.sleep(0.05)
+
+            msg = _message_queue.get_nowait()
+            assert msg.content == "hello agent"
+            assert msg.sender == "user1"
+            assert msg.channel_type == "fake"
+
+            # Simulate main-thread response
+            _set_channel_response(msg.msg_id, "Reply to: hello agent")
+
+            outbound = await asyncio.wait_for(
+                bus.consume_outbound(), timeout=2.0,
+            )
+            assert outbound.channel == "fake"
+            assert outbound.chat_id == "chat1"
+            assert "Reply to: hello agent" in outbound.content
+
+            consumer.cancel()
             try:
-                consumer = asyncio.create_task(
-                    _bus_inbound_consumer(bus, manager, None, "test-thread", False)
-                )
-
-                await bus.publish_inbound(InboundMessage(
-                    channel="fake",
-                    sender_id="user1",
-                    chat_id="chat1",
-                    content="hello agent",
-                ))
-
-                await asyncio.sleep(0.5)
-
-                outbound = await asyncio.wait_for(
-                    bus.consume_outbound(), timeout=2.0,
-                )
-                assert outbound.channel == "fake"
-                assert outbound.chat_id == "chat1"
-                assert "Reply to: hello agent" in outbound.content
-
-                consumer.cancel()
-                try:
-                    await consumer
-                except asyncio.CancelledError:
-                    pass
-            finally:
-                events_mod.stream_agent_events = original
+                await consumer
+            except asyncio.CancelledError:
+                pass
 
         _run(_test())
 
-    def test_agent_error_publishes_error_outbound(self):
-        """When agent raises, an error message is published outbound."""
-        from EvoScientist.cli.channel import _bus_inbound_consumer
+    def test_no_response_fallback(self):
+        """Empty response is replaced with 'No response' fallback."""
+        from EvoScientist.cli.channel import (
+            _bus_inbound_consumer,
+            _message_queue,
+            _set_channel_response,
+        )
+        _drain_queue(_message_queue)
 
         async def _test():
             bus = MessageBus()
@@ -143,46 +142,47 @@ class TestBusInboundConsumer:
             ch = FakeChannel()
             manager.register(ch)
 
-            mock_stream = _mock_stream_events_error("agent crashed")
+            consumer = asyncio.create_task(
+                _bus_inbound_consumer(bus, manager, False)
+            )
 
-            import EvoScientist.stream.events as events_mod
-            original = events_mod.stream_agent_events
-            events_mod.stream_agent_events = mock_stream
+            await bus.publish_inbound(InboundMessage(
+                channel="fake",
+                sender_id="user1",
+                chat_id="chat1",
+                content="test",
+            ))
 
+            for _ in range(20):
+                if not _message_queue.empty():
+                    break
+                await asyncio.sleep(0.05)
+
+            msg = _message_queue.get_nowait()
+            # Set empty response — falsy, so consumer falls back to "No response"
+            _set_channel_response(msg.msg_id, "")
+
+            outbound = await asyncio.wait_for(
+                bus.consume_outbound(), timeout=2.0,
+            )
+            assert outbound.content == "No response"
+
+            consumer.cancel()
             try:
-                consumer = asyncio.create_task(
-                    _bus_inbound_consumer(bus, manager, None, "test-thread", False)
-                )
-
-                await bus.publish_inbound(InboundMessage(
-                    channel="fake",
-                    sender_id="user1",
-                    chat_id="chat1",
-                    content="crash me",
-                ))
-
-                await asyncio.sleep(0.5)
-
-                outbound = await asyncio.wait_for(
-                    bus.consume_outbound(), timeout=2.0,
-                )
-                assert outbound.channel == "fake"
-                assert "Error" in outbound.content or "error" in outbound.content.lower()
-                assert "agent crashed" in outbound.content
-
-                consumer.cancel()
-                try:
-                    await consumer
-                except asyncio.CancelledError:
-                    pass
-            finally:
-                events_mod.stream_agent_events = original
+                await consumer
+            except asyncio.CancelledError:
+                pass
 
         _run(_test())
 
     def test_message_counting(self):
         """Messages are counted via record_message."""
-        from EvoScientist.cli.channel import _bus_inbound_consumer
+        from EvoScientist.cli.channel import (
+            _bus_inbound_consumer,
+            _message_queue,
+            _set_channel_response,
+        )
+        _drain_queue(_message_queue)
 
         async def _test():
             bus = MessageBus()
@@ -190,97 +190,89 @@ class TestBusInboundConsumer:
             ch = FakeChannel()
             manager.register(ch)
 
-            mock_stream = _mock_stream_events("test", "ok")
+            consumer = asyncio.create_task(
+                _bus_inbound_consumer(bus, manager, False)
+            )
 
-            import EvoScientist.stream.events as events_mod
-            original = events_mod.stream_agent_events
-            events_mod.stream_agent_events = mock_stream
+            await bus.publish_inbound(InboundMessage(
+                channel="fake",
+                sender_id="u1",
+                chat_id="c1",
+                content="test",
+            ))
 
+            for _ in range(20):
+                if not _message_queue.empty():
+                    break
+                await asyncio.sleep(0.05)
+
+            msg = _message_queue.get_nowait()
+            _set_channel_response(msg.msg_id, "ok")
+
+            await asyncio.wait_for(bus.consume_outbound(), timeout=2.0)
+
+            assert manager._message_counts["fake"]["received"] == 1
+            assert manager._message_counts["fake"]["sent"] == 1
+
+            consumer.cancel()
             try:
-                consumer = asyncio.create_task(
-                    _bus_inbound_consumer(bus, manager, None, "test-thread", False)
-                )
-
-                await bus.publish_inbound(InboundMessage(
-                    channel="fake",
-                    sender_id="u1",
-                    chat_id="c1",
-                    content="test",
-                ))
-
-                await asyncio.sleep(0.5)
-                await asyncio.wait_for(bus.consume_outbound(), timeout=2.0)
-
-                assert manager._message_counts["fake"]["received"] == 1
-                assert manager._message_counts["fake"]["sent"] == 1
-
-                consumer.cancel()
-                try:
-                    await consumer
-                except asyncio.CancelledError:
-                    pass
-            finally:
-                events_mod.stream_agent_events = original
+                await consumer
+            except asyncio.CancelledError:
+                pass
 
         _run(_test())
 
-    def test_thinking_sent_to_channel(self):
-        """Thinking messages are sent to the channel when show_thinking=True."""
-        from EvoScientist.cli.channel import _bus_inbound_consumer
+    def test_channel_message_carries_metadata(self):
+        """ChannelMessage carries metadata, chat_id, and message_id."""
+        from EvoScientist.cli.channel import (
+            _bus_inbound_consumer,
+            _message_queue,
+            _set_channel_response,
+        )
+        _drain_queue(_message_queue)
 
         async def _test():
             bus = MessageBus()
             manager = ChannelManager(bus)
             ch = FakeChannel()
-            server = manager.register(ch)
-            server.send_thinking = True
+            manager.register(ch)
 
-            long_thinking = "A" * 250  # >= _MIN_THINKING_LEN (200)
-            mock_stream = _mock_stream_events_with_thinking(
-                long_thinking, "final answer",
+            consumer = asyncio.create_task(
+                _bus_inbound_consumer(bus, manager, False)
             )
 
-            import EvoScientist.stream.events as events_mod
-            original = events_mod.stream_agent_events
-            events_mod.stream_agent_events = mock_stream
+            await bus.publish_inbound(InboundMessage(
+                channel="fake",
+                sender_id="user1",
+                chat_id="chat1",
+                content="with metadata",
+                metadata={"key": "value"},
+                message_id="msg-123",
+            ))
 
+            for _ in range(20):
+                if not _message_queue.empty():
+                    break
+                await asyncio.sleep(0.05)
+
+            msg = _message_queue.get_nowait()
+            assert msg.content == "with metadata"
+            assert msg.metadata == {"key": "value"}
+            assert msg.chat_id == "chat1"
+            assert msg.message_id == "msg-123"
+            assert msg.channel_ref is ch
+
+            _set_channel_response(msg.msg_id, "done")
+
+            outbound = await asyncio.wait_for(
+                bus.consume_outbound(), timeout=2.0,
+            )
+            assert outbound.reply_to == "msg-123"
+
+            consumer.cancel()
             try:
-                consumer = asyncio.create_task(
-                    _bus_inbound_consumer(
-                        bus, manager, None, "test-thread", True,
-                    )
-                )
-
-                await bus.publish_inbound(InboundMessage(
-                    channel="fake",
-                    sender_id="user1",
-                    chat_id="chat1",
-                    content="think about this",
-                    metadata={"chat_id": "chat1"},
-                ))
-
-                await asyncio.sleep(0.5)
-
-                # Drain outbound (final answer)
-                outbound = await asyncio.wait_for(
-                    bus.consume_outbound(), timeout=2.0,
-                )
-                assert "final answer" in outbound.content
-
-                # Check that thinking was sent via channel.send
-                thinking_msgs = [
-                    m for m in ch._sent
-                    if "\U0001f9e0" in m.content
-                ]
-                assert len(thinking_msgs) == 1
-                assert long_thinking in thinking_msgs[0].content
-
-                consumer.cancel()
-                try:
-                    await consumer
-                except asyncio.CancelledError:
-                    pass
-            finally:
-                events_mod.stream_agent_events = original
+                await consumer
+            except asyncio.CancelledError:
+                pass
 
         _run(_test())

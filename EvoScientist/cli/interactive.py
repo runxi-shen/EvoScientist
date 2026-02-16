@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import queue
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -32,10 +33,13 @@ from ..sessions import (
 from ..stream.display import console, _run_streaming
 from .agent import _shorten_path, _create_session_workspace, _load_agent
 from .channel import (
+    ChannelMessage,
     _channels_is_running,
     _cmd_channel,
     _cmd_channel_stop,
     _auto_start_channel,
+    _message_queue,
+    _set_channel_response,
 )
 import EvoScientist.cli.channel as _ch_mod
 from .mcp_ui import _cmd_mcp
@@ -429,8 +433,132 @@ def cmd_interactive(
             else:
                 print_banner(state["thread_id"], state["workspace_dir"], memory_dir, mode, model, provider)
 
-            # Start background queue checker
-            # (no longer needed — bus mode handles messages internally)
+            # ---- Channel queue processing (bus → main thread) ----
+
+            async def _process_channel_message(msg: ChannelMessage) -> None:
+                """Process a single channel message with real-time streaming.
+
+                Clears the waiting prompt line and reprints the message as if
+                the user typed it after ❯, then streams the agent response
+                with Rich Live display.
+
+                Display:
+                  ❯ message content
+                  [channel: Received from sender]
+                  ─────────────────
+                  (real-time streaming output)
+                  [channel: Replied to sender]
+                  ─────────────────
+                """
+                # Clear the waiting ❯ prompt line
+                sys.stdout.write("\r\033[2K")
+                sys.stdout.flush()
+
+                # Reprint as if user typed it after ❯
+                prompt_line = Text()
+                prompt_line.append("\u276f ", style="bold blue")
+                prompt_line.append(msg.content)
+                console.print(prompt_line)
+                rx = Text()
+                rx.append(f"[{msg.channel_type}: Received from ", style="dim")
+                rx.append(msg.sender, style="cyan")
+                rx.append("]", style="dim")
+                console.print(rx)
+                _print_separator()
+                console.print()
+
+                def _send_thinking_to_channel(thinking: str) -> None:
+                    """Send thinking text to the channel (sync callback)."""
+                    ch = msg.channel_ref
+                    loop = _ch_mod._bus_loop
+                    if ch and loop and ch.send_thinking:
+                        try:
+                            future = asyncio.run_coroutine_threadsafe(
+                                ch.send_thinking_message(
+                                    sender=msg.chat_id,
+                                    thinking=thinking,
+                                    metadata=msg.metadata,
+                                ),
+                                loop,
+                            )
+                            future.result(timeout=15)
+                        except Exception:
+                            pass
+
+                def _send_todo_to_channel(items: list[dict]) -> None:
+                    """Send todo list to the channel (sync callback)."""
+                    from ..channels.consumer import _format_todo_list
+                    ch = msg.channel_ref
+                    loop = _ch_mod._bus_loop
+                    if ch and loop:
+                        try:
+                            future = asyncio.run_coroutine_threadsafe(
+                                ch.send_todo_message(
+                                    sender=msg.chat_id,
+                                    content=_format_todo_list(items),
+                                    metadata=msg.metadata,
+                                ),
+                                loop,
+                            )
+                            future.result(timeout=15)
+                        except Exception:
+                            pass
+
+                def _send_media_to_channel(file_path: str) -> None:
+                    """Send media file back through the channel (sync callback)."""
+                    ch = msg.channel_ref
+                    loop = _ch_mod._bus_loop
+                    if ch and loop:
+                        try:
+                            future = asyncio.run_coroutine_threadsafe(
+                                ch.send_media(
+                                    recipient=msg.chat_id,
+                                    file_path=file_path,
+                                    metadata=msg.metadata,
+                                ),
+                                loop,
+                            )
+                            future.result(timeout=30)
+                        except Exception as e:
+                            console.print(f"[dim]Media send failed: {e}[/dim]")
+
+                meta = _build_metadata(state["workspace_dir"], model)
+                try:
+                    response = _run_streaming(
+                        state["agent"], msg.content, state["thread_id"],
+                        show_thinking, interactive=True, metadata=meta,
+                        on_thinking=_send_thinking_to_channel,
+                        on_todo=_send_todo_to_channel,
+                        on_file_write=_send_media_to_channel,
+                    )
+                except Exception as e:
+                    response = f"Error: {e}"
+                    console.print(f"[red]Channel error: {e}[/red]")
+
+                _set_channel_response(msg.msg_id, response)
+
+                tx = Text()
+                tx.append(f"[{msg.channel_type}: Replied to ", style="dim")
+                tx.append(msg.sender, style="cyan")
+                tx.append("]", style="dim")
+                console.print(tx)
+                _print_separator()
+
+                # Redraw the ❯ prompt on a new line after separator
+                sys.stdout.write("\n\033[34;1m\u276f\033[0m ")
+                sys.stdout.flush()
+
+            async def _check_channel_queue() -> None:
+                """Poll the channel message queue and dispatch to the agent."""
+                while True:
+                    try:
+                        msg = _message_queue.get_nowait()
+                    except queue.Empty:
+                        await asyncio.sleep(0.1)
+                        continue
+                    await _process_channel_message(msg)
+
+            queue_task = asyncio.create_task(_check_channel_queue())
 
             # Auto-start channel if enabled in config
             from ..config import load_config
@@ -483,6 +611,10 @@ def cmd_interactive(
                             state["agent"] = _load_agent(workspace_dir=state["workspace_dir"], checkpointer=checkpointer)
                             state["thread_id"] = generate_thread_id()
                             state["resumed"] = False
+                            # Sync channel refs so the queue checker uses the new agent
+                            if _channels_is_running():
+                                _ch_mod._cli_agent = state["agent"]
+                                _ch_mod._cli_thread_id = state["thread_id"]
                             console.print(f"[green]New session:[/green] [yellow]{state['thread_id']}[/yellow]")
                             if state["workspace_dir"]:
                                 console.print(f"[dim]Workspace:[/dim] [cyan]{_shorten_path(state['workspace_dir'])}[/cyan]\n")
@@ -552,7 +684,11 @@ def cmd_interactive(
                         else:
                             console.print(f"[red]Error: {e}[/red]")
             finally:
-                pass
+                queue_task.cancel()
+                try:
+                    await queue_task
+                except asyncio.CancelledError:
+                    pass
 
     # Run the async main loop
     try:

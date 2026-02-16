@@ -1,8 +1,20 @@
-"""Background channel management — bus mode with ChannelManager."""
+"""Background channel management — bus mode with ChannelManager.
+
+Architecture:
+  Bus thread: runs ChannelManager + all channels + inbound consumer.
+  Main CLI thread: runs agent invocations (to avoid event-loop conflicts).
+
+The inbound consumer does NOT call the agent directly.  Instead it
+enqueues a ``ChannelMessage`` on a thread-safe ``queue.Queue`` and waits
+for the main thread to set a response via ``_set_channel_response()``.
+"""
 
 import asyncio
 import logging
+import queue
 import threading
+import uuid
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from rich.panel import Panel
@@ -14,7 +26,62 @@ from ..stream.display import console
 _channel_logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Queue bridge: bus thread  ⇄  main CLI thread
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChannelMessage:
+    """A message from a channel, enqueued for the main CLI thread."""
+    msg_id: str
+    content: str
+    sender: str
+    channel_type: str
+    metadata: Any = None
+    # Filled by the bus consumer so the main thread can send callbacks
+    channel_ref: Any = None  # Channel instance (for thinking / todo / file)
+    bus_ref: Any = None      # MessageBus (for publishing outbound)
+    chat_id: str = ""
+    message_id: str | None = None
+
+
+# Thread-safe queue: bus → main
+_message_queue: queue.Queue[ChannelMessage] = queue.Queue()
+
+# Pending responses: main → bus (msg_id → {"event": Event, "response": str|None})
+_pending_responses: dict[str, dict] = {}
+_response_lock = threading.Lock()
+
+
+def _enqueue_channel_message(msg: ChannelMessage) -> threading.Event:
+    """Enqueue a channel message for the main thread and return a wait event."""
+    event = threading.Event()
+    with _response_lock:
+        _pending_responses[msg.msg_id] = {"event": event, "response": None}
+    _message_queue.put(msg)
+    return event
+
+
+def _set_channel_response(msg_id: str, response: str) -> None:
+    """Set the response for a channel message and unblock the bus consumer."""
+    with _response_lock:
+        slot = _pending_responses.get(msg_id)
+        if slot:
+            slot["response"] = response
+            slot["event"].set()
+
+
+def _pop_channel_response(msg_id: str) -> str | None:
+    """Retrieve and remove the response for a channel message."""
+    with _response_lock:
+        slot = _pending_responses.pop(msg_id, None)
+    return slot["response"] if slot else None
+
+
+# ---------------------------------------------------------------------------
 # Module-level channel state (bus mode)
+# ---------------------------------------------------------------------------
+
 _manager: Optional[Any] = None  # ChannelManager
 _bus_loop: Optional[asyncio.AbstractEventLoop] = None
 _bus_thread: Optional[threading.Thread] = None
@@ -103,7 +170,7 @@ def _start_channels_bus_mode(config, agent, thread_id: str, show_thinking: bool 
 
         async def _run():
             consumer = asyncio.create_task(
-                _bus_inbound_consumer(mgr.bus, mgr, agent, thread_id, show_thinking)
+                _bus_inbound_consumer(mgr.bus, mgr, show_thinking)
             )
             try:
                 await mgr.start_all()
@@ -152,27 +219,15 @@ def _add_channel_to_running_bus(channel_type: str, config) -> None:
 
 
 async def _bus_inbound_consumer(
-    bus, manager, agent, thread_id: str, show_thinking: bool = True,
+    bus, manager, show_thinking: bool = True,
 ) -> None:
-    """Core bridge: consume inbound messages from bus and run agent.
+    """Consume inbound messages from bus and bridge to the main CLI thread.
 
-    Streams agent events on the bus loop with Rich Live real-time display
-    (identical to interactive CLI) and sends thinking / todo / answer to
-    the originating channel via direct ``await`` calls.
+    This does NOT invoke the agent.  It enqueues a ``ChannelMessage`` on
+    the thread-safe queue and waits for the main thread to set a response.
+    Once the response arrives it publishes the outbound message on the bus.
     """
-    from ..stream import events as _stream_events_mod
-    from ..stream.display import (
-        console, create_streaming_display,
-    )
-    from ..stream.state import StreamState
-    from ..channels.consumer import _format_todo_list
     from ..channels.bus.events import OutboundMessage
-    from rich.live import Live
-    from rich.text import Text as _Text
-
-    def _print_separator():
-        width = console.size.width
-        console.print(_Text("\u2500" * width, style="dim"))
 
     while True:
         try:
@@ -183,95 +238,45 @@ async def _bus_inbound_consumer(
             break
 
         _channel_logger.info(
-            f"[bus] Processing from {msg.channel}:{msg.sender_id}: "
+            f"[bus] Received from {msg.channel}:{msg.sender_id}: "
             f"{msg.content[:60]}..."
         )
         manager.record_message(msg.channel, "received")
 
-        # CLI: show query from channel (mirrors interactive prompt)
-        source_label = _Text()
-        source_label.append(f"[{msg.channel}] ", style="cyan bold")
-        source_label.append(msg.content)
-        console.print(source_label)
-
         channel = manager.get_channel(msg.channel)
-        state = StreamState()
-        thinking_sent = False
-        todo_sent = False
-
         if channel:
             await channel.start_typing(msg.chat_id)
 
+        # Enqueue for main CLI thread to process with its own event loop
+        cm = ChannelMessage(
+            msg_id=str(uuid.uuid4()),
+            content=msg.content,
+            sender=msg.sender_id,
+            channel_type=msg.channel,
+            metadata=msg.metadata,
+            channel_ref=channel,
+            bus_ref=bus,
+            chat_id=msg.chat_id,
+            message_id=msg.message_id,
+        )
+        event = _enqueue_channel_message(cm)
+
+        # Wait (non-blocking for asyncio) until main thread sets response
+        await asyncio.to_thread(event.wait)
+        response = _pop_channel_response(cm.msg_id) or "No response"
+
+        # Publish the response back through the bus → channel
         try:
-            with Live(console=console, refresh_per_second=10, transient=False) as live:
-                live.update(create_streaming_display(is_waiting=True))
-
-                async for event in _stream_events_mod.stream_agent_events(
-                    agent, msg.content, thread_id,
-                ):
-                    etype = state.handle_event(event)
-
-                    # Channel: send thinking on transition
-                    if (etype != "thinking"
-                            and not thinking_sent
-                            and state.thinking_text):
-                        if channel and show_thinking:
-                            await channel.send_thinking_message(
-                                msg.sender_id, state.thinking_text, msg.metadata,
-                            )
-                        thinking_sent = True
-
-                    # Channel: send todo list
-                    if (etype == "tool_call"
-                            and event.get("name") == "write_todos"
-                            and not todo_sent
-                            and state.todo_items):
-                        if channel:
-                            await channel.send_todo_message(
-                                msg.sender_id,
-                                _format_todo_list(state.todo_items),
-                                msg.metadata,
-                            )
-                        todo_sent = True
-
-                    # CLI: Live update
-                    live.update(create_streaming_display(
-                        **state.get_display_args(),
-                        show_thinking=show_thinking,
-                    ))
-                    if etype in (
-                        "tool_call", "tool_result",
-                        "subagent_start", "subagent_tool_call",
-                        "subagent_tool_result", "subagent_end",
-                    ):
-                        live.refresh()
-
-            # Flush remaining thinking
-            if (not thinking_sent
-                    and state.thinking_text):
-                if channel and show_thinking:
-                    await channel.send_thinking_message(
-                        msg.sender_id, state.thinking_text, msg.metadata,
-                    )
-
-            # Channel: publish answer
             await bus.publish_outbound(OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=state.response_text or "No response",
+                content=response,
                 reply_to=msg.message_id or None,
                 metadata=msg.metadata,
             ))
             manager.record_message(msg.channel, "sent")
-            console.print(_Text("> ", style="blue bold"), end="")
         except Exception as e:
-            _channel_logger.error(f"[bus] Agent error: {e}")
-            await bus.publish_outbound(OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"Error processing message: {e}",
-                metadata=msg.metadata,
-            ))
+            _channel_logger.error(f"[bus] Outbound error: {e}")
         finally:
             if channel:
                 await channel.stop_typing(msg.chat_id)
