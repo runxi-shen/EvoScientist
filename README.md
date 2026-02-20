@@ -22,10 +22,8 @@
 > TODO
 - **[27 Sep 2025]** ⛳ Our preprint is now live on [arXiv] — check it out for details.
 
-
 ## Overview
 > TODO
-
 
 ## 📖 Contents
 - [🤖 Supported Models](#-supported-models)
@@ -35,7 +33,7 @@
   - [CLI Inference](#cli-inference)
   - [Script Inference](#script-inference)
   - [Web Interface](#web-interface)
-- [🔌 MCP Tools](#-mcp-tools)
+- [🔌 MCP Integration](#-mcp-integration)
 - [📊 Evaluation](#-evaluation)
 - [📝 Citation](#-citation)
 - [📚 Acknowledgments](#-acknowledgments)
@@ -178,7 +176,7 @@ EvoSci # or EvoScientist
 -p, --prompt <q>   Single-shot mode: execute query and exit
 ```
 
-![demo](./assets/cli_help.png)
+![demo](./assets/EvoScientist_cli_help.png)
 
 **Configuration commands:**
 
@@ -310,116 +308,20 @@ for state in EvoScientist_agent.stream(
 > TODO
 
 
-## 🔌 MCP Tools
+## 🔌 MCP Integration
 
-EvoScientist supports [MCP](https://modelcontextprotocol.io/) servers, allowing you to extend agents with external tools (databases, APIs, etc.).
+EvoScientist connects to external systems via [MCP](https://modelcontextprotocol.io/) servers. Supports `stdio`, `http`, `streamable_http`, `sse`, and `websocket` transports.
 
-### Adding Servers
+```bash
+# Add a server from the terminal
+EvoSci mcp add sequential-thinking npx -- -y @modelcontextprotocol/server-sequential-thinking
 
-The quickest way to add an MCP server is from the CLI:
-
-```Shell
-# stdio transport (auto-detected from command)
-EvoSci mcp add filesystem npx -- -y @modelcontextprotocol/server-filesystem /tmp
-
-# http transport (auto-detected from URL)
-EvoSci mcp add brave-search http://localhost:8080/mcp -H "Authorization:Bearer ${BRAVE_API_KEY}"
-
-# sse transport, routed to a specific agent
-EvoSci mcp add my-sse http://localhost:9090/sse --transport sse -e research-agent
-
-# With tool allowlist (supports glob wildcards)
-EvoSci mcp add fs npx -- -y @modelcontextprotocol/server-filesystem /tmp -t "read_*,write_*"
+# Or from inside an agent session
+/mcp add sequential-thinking npx -- -y @modelcontextprotocol/server-sequential-thinking
 ```
 
-Or from the interactive CLI:
-
-```
-/mcp add filesystem npx -y @modelcontextprotocol/server-filesystem /tmp
-/mcp remove filesystem
-/mcp list
-```
-
-**Options:**
-
-| Flag | Description |
-|------|-------------|
-| `--tools`, `-t` | Comma-separated tool allowlist, supports glob wildcards (omit = all tools) |
-| `--expose-to`, `-e` | Comma-separated target agents (default: `main`) |
-| `--header`, `-H` | HTTP header as `Key:Value` (repeatable) |
-| `--env` | Env var as `KEY=VALUE` for stdio (repeatable) |
-
-### YAML Configuration
-
-Servers are stored in `~/.config/evoscientist/mcp.yaml`. You can also edit this file directly:
-
-```yaml
-filesystem:
-  transport: stdio
-  command: npx
-  args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
-  tools: ["read_*", "write_*"]       # optional allowlist with wildcards (omit = all tools)
-  expose_to: [main, code-agent]      # optional routing (omit = ["main"])
-
-brave-search:
-  transport: http
-  url: "http://localhost:8080/mcp"
-  headers:
-    Authorization: "Bearer ${BRAVE_API_KEY}"
-  expose_to: [research-agent]
-```
-
-Use `${VAR}` syntax to reference environment variables in config values.
-
-### Supported Transports
-
-| Transport | Config Fields |
-|-----------|--------------|
-| `stdio` | `command`, `args`, `env` (optional) |
-| `http` | `url`, `headers` (optional) |
-| `sse` | `url`, `headers` (optional) |
-| `websocket` | `url` |
-
-### Tool Routing
-
-Use `expose_to` to control which agents receive each server's tools:
-
-- `main` — the main EvoScientist orchestrator agent
-- Any subagent name (`code-agent`, `research-agent`, `debug-agent`, `planner-agent`, `data-analysis-agent`, `writing-agent`)
-
-Tools routed to subagents are injected automatically — no need to edit `subagent.yaml`. All MCP tools are also registered in the tool registry, so they can be referenced by name in `subagent.yaml` if needed.
-
-### Editing Servers
-
-Update individual fields on an existing server without re-adding it:
-
-```Shell
-# Change routing
-EvoSci mcp edit filesystem --expose-to main,code-agent
-
-# Set a tool allowlist (supports glob wildcards)
-EvoSci mcp edit filesystem --tools "read_*,write_*"
-
-# Clear a tool allowlist (pass all tools)
-EvoSci mcp edit filesystem --tools none
-
-# Change URL
-EvoSci mcp edit my-api --url http://new-host:9090/mcp
-```
-
-Or interactively: `/mcp edit filesystem --expose-to main,code-agent`
-
-### Management Commands
-
-```Shell
-EvoSci mcp              # List configured servers
-EvoSci mcp list         # List configured servers
-EvoSci mcp add ...      # Add a server
-EvoSci mcp edit ...     # Edit an existing server
-EvoSci mcp remove ...   # Remove a server
-```
-
-All commands also work interactively: `/mcp`, `/mcp list`, `/mcp add ...`, `/mcp edit ...`, `/mcp remove <name>`.
+> [!NOTE]
+> For command options, config fields, tool routing, wildcard filtering, and troubleshooting, see the **[MCP Integration Guide](./EvoScientist/mcp/README.md)**.
 
 ## 📊 Evaluation
 
@@ -439,7 +341,6 @@ This project builds upon the following outstanding open-source works:
 - [**Deep Agents UI**](https://github.com/langchain-ai/deep-agents-ui) — A user interface for visualising and managing Deep Agents.
 
 We thank the authors for their valuable contributions to the open-source community.
-
 
 ## 📦 EvoScientist Team
 
