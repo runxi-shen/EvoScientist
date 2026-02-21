@@ -124,7 +124,23 @@ class SubAgentWidget(Vertical):
         tool_args: dict | None = None,
         tool_id: str = "",
     ) -> ToolCallWidget:
-        """Mount a new ToolCallWidget inside this sub-agent."""
+        """Mount a new ToolCallWidget inside this sub-agent.
+
+        If a widget with the same *tool_id* already exists (re-emitted with
+        updated args during incremental streaming), update it in place instead
+        of creating a duplicate.
+        """
+        if tool_id and tool_id in self._tool_widgets:
+            # Re-emitted with updated args — update in place
+            existing = self._tool_widgets[tool_id]
+            existing._tool_name = tool_name
+            existing._tool_args = tool_args or {}
+            try:
+                existing._render_header()
+            except Exception:
+                pass  # Widget may not be mounted yet
+            return existing
+
         self._tool_count += 1
         w = ToolCallWidget(tool_name, tool_args, tool_id)
         tools_container = self.query_one(".sa-tools", Vertical)
@@ -171,14 +187,11 @@ class SubAgentWidget(Vertical):
         if self._timer_handle is not None:
             self._timer_handle.stop()
             self._timer_handle = None
-        # Stop timers on any nested ToolCallWidgets still running
+        # Mark any nested ToolCallWidgets still running as interrupted
         for tw in self._tool_widgets.values():
             if tw._status == "running":
-                tw._stop_timer()
-                tw._status = "success"
                 try:
-                    tw._render_header()
-                    tw._render_status()
+                    tw.set_interrupted()
                 except Exception:
                     pass
         self.add_class("--completed")

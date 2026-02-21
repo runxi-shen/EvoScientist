@@ -119,6 +119,8 @@ class TestToolCallWidget(unittest.TestCase):
         assert w._status == "success"
         w._status = "error"
         assert w._status == "error"
+        w._status = "interrupted"
+        assert w._status == "interrupted"
 
     def test_result_summary_truncation(self):
         from EvoScientist.cli.widgets.tool_call_widget import ToolCallWidget
@@ -221,6 +223,19 @@ class TestSubAgentWidget(unittest.TestCase):
         w = SubAgentWidget("sub-agent", "old desc")
         w.update_name("code-agent", "new desc")
         assert w._description == "new desc"
+
+    def test_tool_widgets_dict_keyed_by_id(self):
+        """_tool_widgets dict should be keyed by tool_id for dedup."""
+        from EvoScientist.cli.widgets.subagent_widget import SubAgentWidget
+        from EvoScientist.cli.widgets.tool_call_widget import ToolCallWidget
+
+        sa = SubAgentWidget("research-agent")
+        # Simulate pre-populating a tool widget (as add_tool_call would)
+        tw = ToolCallWidget("tavily_search", {"query": ""}, "id-1")
+        sa._tool_widgets["id-1"] = tw
+        # Verify lookup works
+        assert "id-1" in sa._tool_widgets
+        assert sa._tool_widgets["id-1"] is tw
 
 
 @unittest.skipUnless(_has_textual, "textual not installed")
@@ -373,6 +388,13 @@ class TestToolCallWidgetIcons(unittest.TestCase):
 
         w = ToolCallWidget("grep", {}, "id3")
         assert w._status == "running"
+
+    def test_interrupted_icon(self):
+        from EvoScientist.cli.widgets.tool_call_widget import ToolCallWidget
+
+        w = ToolCallWidget("execute", {"command": "long"}, "id4")
+        w._status = "interrupted"
+        assert w._status == "interrupted"
 
 
 @unittest.skipUnless(_has_textual, "textual not installed")

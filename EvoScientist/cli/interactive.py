@@ -629,9 +629,9 @@ def cmd_interactive(
                             console.print(f"[dim]Thread:[/dim] [yellow]{state['thread_id']}[/yellow]")
                             if state["workspace_dir"]:
                                 console.print(f"[dim]Workspace:[/dim] [cyan]{_shorten_path(state['workspace_dir'])}[/cyan]")
-                            console.print(f"[dim]UI:[/dim] [cyan]{state['ui_backend']}[/cyan]")
                             if memory_dir:
                                 console.print(f"[dim]Memory dir:[/dim] [cyan]{_shorten_path(memory_dir)}[/cyan]")
+                            console.print(f"[dim]UI:[/dim] [cyan]{state['ui_backend']}[/cyan]")
                             console.print()
                             continue
 

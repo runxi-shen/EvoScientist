@@ -5,6 +5,7 @@ from __future__ import annotations
 from rich.text import Text
 
 from textual.containers import Vertical
+from textual.events import Click
 from textual.widgets import Static
 
 from ...stream.utils import format_tool_compact
@@ -19,7 +20,7 @@ _COLLAPSE_CHARS = 400
 class ToolCallWidget(Vertical):
     """Displays a single tool call with running spinner → result.
 
-    Lifecycle: ``running`` → ``success`` | ``error``
+    Lifecycle: ``running`` → ``success`` | ``error`` | ``interrupted``
 
     Usage::
 
@@ -103,6 +104,9 @@ class ToolCallWidget(Vertical):
         elif self._status == "success":
             line.append("\u2713 ", style="bold green")
             line.append(compact, style="bold green")
+        elif self._status == "interrupted":
+            line.append("\u25a0 ", style="bold yellow")
+            line.append(compact, style="bold yellow dim")
         else:
             line.append("\u2717 ", style="bold red")
             line.append(compact, style="bold red")
@@ -118,6 +122,8 @@ class ToolCallWidget(Vertical):
             # Show first line of result as summary
             summary = self._result_summary()
             status_w.update(Text(f"\u2713 {summary}", style="green dim"))
+        elif self._status == "interrupted":
+            status_w.update(Text("\u25a0 interrupted", style="yellow dim"))
         else:
             summary = self._result_summary()
             status_w.update(Text(f"\u2717 {summary}", style="red dim"))
@@ -144,6 +150,13 @@ class ToolCallWidget(Vertical):
         self._render_status()
         self._render_output()
 
+    def set_interrupted(self) -> None:
+        """Mark tool call as interrupted/cancelled."""
+        self._status = "interrupted"
+        self._stop_timer()
+        self._render_header()
+        self._render_status()
+
     def set_error(self, content: str) -> None:
         """Mark tool call as failed."""
         self._status = "error"
@@ -159,14 +172,42 @@ class ToolCallWidget(Vertical):
             return
         if self._status == "error" or not self._should_collapse():
             # Show full output for errors or short output
+            self._collapsed = False
             style = "red dim" if self._status == "error" else "dim"
             content = self._result_content.strip()
             if len(content) > 800:
                 content = content[:800] + "\n... (truncated)"
             output_w.update(Text(content, style=style))
             output_w.add_class("--visible")
-        # Otherwise collapsed — user can click to expand
-        # (click handling left for future enhancement)
+        else:
+            # Collapsed — show hint, click to expand
+            self._collapsed = True
+            output_w.update(
+                Text("  [click to expand output]", style="dim italic"),
+            )
+            output_w.add_class("--visible")
+
+    def on_click(self, event: Click) -> None:
+        """Toggle collapsed output on click."""
+        if self._status == "running" or not self._result_content.strip():
+            return
+        if not self._should_collapse():
+            return  # Short output is always visible, nothing to toggle
+        output_w = self.query_one(".tool-output", Static)
+        if self._collapsed:
+            # Expand
+            self._collapsed = False
+            content = self._result_content.strip()
+            if len(content) > 2000:
+                content = content[:2000] + "\n... (truncated)"
+            style = "red dim" if self._status == "error" else "dim"
+            output_w.update(Text(content, style=style))
+        else:
+            # Collapse back
+            self._collapsed = True
+            output_w.update(
+                Text("  [click to expand output]", style="dim italic"),
+            )
 
     def _stop_timer(self) -> None:
         if self._timer_handle is not None:

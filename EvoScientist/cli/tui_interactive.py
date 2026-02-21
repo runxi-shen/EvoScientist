@@ -10,7 +10,6 @@ import asyncio
 import logging
 import queue
 import shlex
-from pathlib import Path
 from typing import Any, Callable
 
 from rich.console import Group
@@ -62,18 +61,12 @@ _TUI_SLASH_COMMANDS = [
 ]
 
 
-def _home_relative_path(path_str: str | None) -> str:
-    """Render paths in a compact, user-friendly form."""
-    if not path_str:
-        return ""
-    path = Path(path_str).expanduser().resolve()
-    home = Path.home().resolve()
-    try:
-        if path.is_relative_to(home):
-            return f"~/{path.relative_to(home)}"
-    except ValueError:
-        pass
-    return str(path)
+def _shorten_path(path: str) -> str:
+    """Shorten absolute path to a cwd-relative form (consistent with Rich CLI)."""
+    if not path:
+        return path
+    from .agent import _shorten_path as _sp
+    return _sp(path)
 
 
 def _build_welcome_banner(
@@ -269,6 +262,7 @@ def run_textual_interactive(
             checkpointer: Any,
             channel_send_thinking_value: bool = True,
             resumed: bool = False,
+            resume_warning: str = "",
         ) -> None:
             super().__init__()
             self._agent = agent
@@ -277,6 +271,7 @@ def run_textual_interactive(
             self._checkpointer = checkpointer
             self._channel_send_thinking = channel_send_thinking_value
             self._resumed = resumed
+            self._resume_warning = resume_warning
             self._channel_timer: Any = None
             self._started_channel_types: list[str] = []
             self._busy = False
@@ -307,8 +302,10 @@ def run_textual_interactive(
             self._render_welcome()
             self._render_status()
             self.query_one("#prompt", Input).focus()
-            # Show resumed session info (matches CLI behavior)
-            if self._resumed:
+            # Show resume status
+            if self._resume_warning:
+                self._append_system(self._resume_warning, style="yellow")
+            elif self._resumed:
                 self._append_system(
                     f"Resumed session: {self._thread_id}", style="green",
                 )
@@ -716,6 +713,7 @@ def run_textual_interactive(
                                 event.get("name", "unknown"),
                                 event.get("content", ""),
                                 event.get("success", True),
+                                event.get("id", ""),
                             )
 
                     elif event_type == "subagent_end":
@@ -787,14 +785,11 @@ def run_textual_interactive(
                 # Clean up transient indicators
                 for w in (narration_w, processing_w):
                     await _remove_w(w)
-                # Stop timers on any remaining running tool widgets
+                # Mark any still-running tool widgets as interrupted
                 for tw in tool_widgets.values():
                     if tw._status == "running":
-                        tw._stop_timer()
-                        tw._status = "success"
                         try:
-                            tw._render_header()
-                            tw._render_status()
+                            tw.set_interrupted()
                         except Exception:
                             pass
                 # Finalize any still-active sub-agents
@@ -858,15 +853,18 @@ def run_textual_interactive(
                 style="dim",
             )
 
-            # Build channel callbacks
-            def _send_to_channel(coro, label: str, timeout: int = 15) -> None:
+            # Build channel callbacks (fire-and-forget to avoid blocking UI)
+            def _send_to_channel(coro, label: str) -> None:
                 loop = _ch_mod._bus_loop
                 if not loop:
                     return
-                try:
-                    asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=timeout)
-                except Exception as e:
-                    _channel_logger.debug(f"{label} send failed: {e}")
+                future = asyncio.run_coroutine_threadsafe(coro, loop)
+                future.add_done_callback(
+                    lambda f: (
+                        _channel_logger.debug(f"{label} send failed: {f.exception()}")
+                        if f.exception() else None
+                    )
+                )
 
             def _send_thinking(thinking: str) -> None:
                 ch = msg.channel_ref
@@ -1032,7 +1030,7 @@ def run_textual_interactive(
             arg = arg.strip()
 
             if cmd in ("/exit", "/quit", "/q"):
-                self.exit()
+                self.action_request_quit()
                 return
 
             if cmd == "/help":
@@ -1049,13 +1047,13 @@ def run_textual_interactive(
                 self._append_system(f"Thread: {self._thread_id}", style="dim")
                 if self._workspace_dir:
                     self._append_system(
-                        f"Workspace: {_home_relative_path(self._workspace_dir)}",
+                        f"Workspace: {_shorten_path(self._workspace_dir)}",
                         style="dim",
                     )
-                self._append_system("UI: textual", style="dim")
-                memory_path = _home_relative_path(str(paths.MEMORY_DIR))
+                memory_path = _shorten_path(str(paths.MEMORY_DIR))
                 if memory_path:
                     self._append_system(f"Memory dir: {memory_path}", style="dim")
+                self._append_system("UI: textual", style="dim")
                 return
 
             if cmd == "/new":
@@ -1267,7 +1265,7 @@ def run_textual_interactive(
             if not skills:
                 self._append_system("No skills available.", style="dim")
                 self._append_system("Install with: /install-skill <path-or-url>", style="dim")
-                self._append_system(f"Skills directory: {_home_relative_path(str(USER_SKILLS_DIR))}", style="dim")
+                self._append_system(f"Skills directory: {_shorten_path(str(USER_SKILLS_DIR))}", style="dim")
                 return
 
             user_skills = [s for s in skills if s.source == "user"]
@@ -1290,7 +1288,7 @@ def run_textual_interactive(
                 self._mount_renderable(table)
 
             self._append_system(
-                f"User skills folder: {_home_relative_path(str(USER_SKILLS_DIR))}",
+                f"User skills folder: {_shorten_path(str(USER_SKILLS_DIR))}",
                 style="dim",
             )
 
@@ -1316,7 +1314,7 @@ def run_textual_interactive(
                     f"Description: {result.get('description', '(none)')}",
                     style="dim",
                 )
-                self._append_system(f"Path: {_home_relative_path(result['path'])}", style="dim")
+                self._append_system(f"Path: {_shorten_path(result['path'])}", style="dim")
                 self._append_system("Reload with /new to apply.", style="dim")
             else:
                 self._append_system(f"Failed: {result['error']}", style="red")
@@ -1758,6 +1756,7 @@ def run_textual_interactive(
             effective_workspace = workspace_dir
             effective_thread_id = thread_id
             resumed = False
+            resume_warning = ""
             if thread_id:
                 if await thread_exists(thread_id):
                     resolved = thread_id
@@ -1771,6 +1770,10 @@ def run_textual_interactive(
                         effective_workspace = ws
                     effective_thread_id = resolved
                     resumed = True
+                else:
+                    resume_warning = (
+                        f"Thread '{thread_id}' not found. Starting new session."
+                    )
             if not effective_thread_id:
                 effective_thread_id = generate_thread_id()
 
@@ -1785,6 +1788,7 @@ def run_textual_interactive(
                 checkpointer=checkpointer,
                 channel_send_thinking_value=channel_send_thinking,
                 resumed=resumed,
+                resume_warning=resume_warning,
             )
             await app.run_async()
 
