@@ -72,12 +72,19 @@ Going beyond traditional human-in-the-loop systems, EvoScientist introduces an A
 ## 📦 Installation
 
 > [!NOTE]
-> Requires **Python 3.11+**. A virtual environment is strongly recommended — EvoScientist experiments may install ML libraries (PyTorch, transformers, etc.) that can conflict with your system packages.
+> Requires **Python 3.11+**. A virtual environment is strongly recommended — EvoScientist experiments may install ML libraries (PyTorch, transformers, etc.) that can conflict with your system packages. We recommend [**uv**](https://docs.astral.sh/uv/) for fast, reliable dependency management — it handles Python versions, virtual environments, and packages in a single tool.
+
+### Install uv (if you don't have it)
+
+```bash
+# Always review scripts before piping to shell: https://astral.sh/uv/install.sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
 ### Quick Install
 
 ```bash
-pip install EvoScientist
+uv pip install EvoScientist
 ```
 
 ### Development Install
@@ -85,7 +92,7 @@ pip install EvoScientist
 ```bash
 git clone https://github.com/EvoScientist/EvoScientist.git
 cd EvoScientist
-pip install -e ".[dev]"
+uv sync --dev
 ```
 
 <details>
@@ -100,10 +107,20 @@ pip install -e ".[dev]"
 </details>
 
 <details>
+<summary>Using pip</summary>
+
+```bash
+pip install EvoScientist          # quick install
+pip install -e ".[dev]"           # development install
+```
+
+</details>
+
+<details>
 <summary>Upgrade to latest</summary>
 
 ```bash
-git pull && pip install -e ".[dev]"
+git pull && uv sync --dev
 ```
 
 </details>
