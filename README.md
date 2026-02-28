@@ -373,7 +373,7 @@ We thank the authors for their valuable contributions to the open-source communi
   </tbody>
 </table>
 
-#### Collaborators
+#### Contributors
 
 Jan Piotrowski, Wiktor Cupiał, Yuyue Zhao, Xinhao Yi, Jakub Kaliski, Jakub Filipiuk, Shuyu Guo, Andreas Sauter, Jacopo Urbani, Zaiqiao Meng, Lun Zhou
 
@@ -390,10 +390,6 @@ For any enquiries or collaboration opportunities, please contact: [**EvoScientis
 <img align="right" alt="EvoScientist Team" src=".github/assets/EvoScientist_team.png" width="20%" />
 
 We welcome contributions from developers and researchers at all levels. Please refer to our [Contributing Guidelines](./CONTRIBUTING.md) to get started and help make EvoScientist more accessible.
-
-### ❤️ Thanks go to these awesome contributors:
-
-[![EvoScientist contributors](https://contrib.rocks/image?repo=EvoScientist/EvoScientist)](https://github.com/EvoScientist/EvoScientist/graphs/contributors)
 
 ### 📈 Star History
 
