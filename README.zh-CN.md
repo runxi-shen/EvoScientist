@@ -16,7 +16,7 @@
   <source media="(prefers-color-scheme: light)" srcset=".github/assets/badge-pypi-light.svg">
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/badge-pypi-dark.svg">
   <img alt="PyPI v0.0.1" src=".github/assets/badge-pypi-light.svg" height="28">
-</picture></a><a href="https://evoscientist.ai/"><picture>
+</picture></a><a href="https://EvoScientist.github.io/"><picture>
   <source media="(prefers-color-scheme: light)" srcset=".github/assets/badge-website-light.svg">
   <source media="(prefers-color-scheme: dark)" srcset=".github/assets/badge-website-dark.svg">
   <img alt="Website" src=".github/assets/badge-website-light.svg" height="28">
