@@ -63,7 +63,8 @@ If no skill is relevant, respond directly to the user without calling any tools.
     if effective_provider == "anthropic":
         eval_kwargs["thinking"] = {"type": "disabled"}
     elif effective_provider == "openai":
-        eval_kwargs["reasoning"] = False
+        # Don't pass reasoning kwarg — let the model use its default for simple tool calls
+        pass
 
     try:
         chat_model = get_chat_model(
