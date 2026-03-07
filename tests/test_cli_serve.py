@@ -61,7 +61,7 @@ def _run_serve_once(
     monkeypatch.setattr(commands, "_start_channels_bus_mode", _fake_start_channels_bus_mode)
     monkeypatch.setattr(commands, "_channels_stop", _fake_channels_stop)
 
-    monkeypatch.setattr(config_mod, "get_effective_config", lambda: config)
+    monkeypatch.setattr(config_mod, "get_effective_config", lambda *_a, **_k: config)
     monkeypatch.setattr(config_mod, "apply_config_to_env", lambda _cfg: None)
 
     monkeypatch.setattr(dotenv, "load_dotenv", lambda *_a, **_k: None)

@@ -60,6 +60,7 @@ Going beyond traditional human-in-the-loop systems, EvoScientist introduces an A
 - [x] 📻 EvoMemory v1.0 shipped
 - [x] ⚒️ 200+ predefined skills built in
 - [x] 🧩 Built-in research-lifecycle skills shipped
+- [x] 👋 Human-in-the-loop action approval
 - [ ] 📺 Web app with workspace UI
 - [ ] 📑 Technical report on the way
 - [ ] 📹 Demo and tutorial in the works
@@ -224,6 +225,27 @@ EvoSci -m run                     # isolated per-session workspace
 EvoSci --ui textual               # alternative TUI backend
 EvoSci serve                      # headless mode — channels only, no interactive prompt
 ```
+
+</details>
+
+<details>
+<summary>Action Approval (HITL)</summary>
+
+By default, shell commands (`execute` tool) require human approval before running. To skip approval prompts:
+
+```bash
+# Per-session: auto-approve via CLI flag
+EvoSci --auto-approve
+EvoSci -p "query" --auto-approve
+
+# Persistent: set in config (applies to all future sessions)
+EvoSci config set auto_approve true
+
+# Or allow only specific command prefixes
+EvoSci config set shell_allow_list "python,pip,pytest,ruff,git"
+```
+
+During a session you can also reply **3** (Approve all) at any approval prompt to auto-approve for the rest of that session.
 
 </details>
 
