@@ -1574,7 +1574,7 @@ def _step_channels(config: EvoScientistConfig) -> dict[str, object]:
         "slack": ["slack-sdk>=3.27", "aiohttp>=3.9"],
         "feishu": ["aiohttp>=3.9"],
         "dingtalk": ["aiohttp>=3.9"],
-        "wechat": ["pycryptodome>=3.20"],
+        "wechat": ["pycryptodome>=3.20", "aiohttp>=3.9"],
         "qq": ["qq-botpy>=1.0"],
     }
 
@@ -1712,7 +1712,7 @@ def _step_channels(config: EvoScientistConfig) -> dict[str, object]:
                 console.print("  [yellow]✗ Required package not installed.[/yellow]")
                 # Determine packages to install
                 _pip_pkgs = _CHANNEL_PIP_DEPS.get(pip_extra, []) if pip_extra else []
-                _pkg_display = ", ".join(_pip_pkgs) if _pip_pkgs else f"evoscientist[{pip_extra}]"
+                _pkg_display = " ".join(f'"{p}"' for p in _pip_pkgs) if _pip_pkgs else f'"evoscientist[{pip_extra}]"'
                 install_now = questionary.confirm(
                     f"Install {_pkg_display} now?",
                     default=True,

@@ -85,9 +85,9 @@ def print_banner(
         info.append(value, style="magenta")
     # Directory line
     import os
-    cwd = os.getcwd()
+    effective_dir = workspace_dir or os.getcwd()
     home = os.path.expanduser("~")
-    dir_display = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
+    dir_display = effective_dir.replace(home, "~", 1) if effective_dir.startswith(home) else effective_dir
     info.append("\n  ", style="dim")
     info.append("Directory: ", style="dim")
     info.append(dir_display, style="magenta")
