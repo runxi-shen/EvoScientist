@@ -441,7 +441,7 @@ channel_enabled: "telegram,discord,slack"
 
 Jan Piotrowski, Wiktor Cupiał, Jakub Kaliski, Jakub Filipiuk, Xinhao Yi, Shuyu Guo, Andreas Sauter, Wenxiang Hu, Jacopo Urbani, Zaiqiao Meng, Jun Luo, Lun Zhou
 
-> <img src=".github/assets/xiaoyi-deepresearch.png" width="16" height="16" alt="Xiaoyi DeepResearch" /> [*Xiaoyi DeepResearch*](https://xiaoyi.huawei.com/chat/research) *Team* 及更广泛的开源社区共同为本项目做出贡献。
+> <img src=".github/assets/xiaoyi-deepresearch.png" height="18" alt="Xiaoyi DeepResearch" style="position: relative; top: 3px;" /> [*Xiaoyi DeepResearch*](https://xiaoyi.huawei.com/chat/research) *Team* 及更广泛的开源社区共同为本项目做出贡献。
 
 如有任何咨询或合作意向，请联系：[**EvoScientist.ai@gmail.com**](mailto:evoscientist.ai@gmail.com)
 
