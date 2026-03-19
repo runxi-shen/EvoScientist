@@ -306,7 +306,7 @@ class TestWeChatCrypto:
         # Parse and verify the encrypted content decrypts back
         root = ET.fromstring(xml_reply)
         encrypt = root.find("Encrypt").text
-        decrypted, app_id = crypto.decrypt(encrypt)
+        decrypted, _app_id = crypto.decrypt(encrypt)
         assert decrypted == msg
 
 

@@ -249,7 +249,7 @@ class TestRetryAsync:
         )
         # With 50% jitter, not all delays should be identical
         if len(delays) > 1:
-            assert len(set(f"{d:.4f}" for d in delays)) > 1
+            assert len({f"{d:.4f}" for d in delays}) > 1
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1438,10 +1438,10 @@ class TestInboundConsumer:
         async def _test():
             consumer = self._make_consumer()
             # Start and immediately stop
-            asyncio.create_task(consumer.run())
+            task = asyncio.create_task(consumer.run())
             await asyncio.sleep(0.1)
             await consumer.stop()
-            await asyncio.sleep(0.1)
+            await task
             assert consumer._stopping is True
 
         _run(_test())

@@ -556,7 +556,8 @@ class TestAddMcpServer:
         add_mcp_server("a", "stdio", command="cmd1")
         add_mcp_server("b", "http", url="http://x")
         data = yaml.safe_load(user_mcp_dir.read_text())
-        assert "a" in data and "b" in data
+        assert "a" in data
+        assert "b" in data
 
 
 class TestRemoveMcpServer:

@@ -58,7 +58,7 @@ class TestCheckCcproxyAuth:
         mock_run.return_value = MagicMock(
             returncode=0, stdout="Authenticated", stderr=""
         )
-        valid, msg = check_ccproxy_auth("codex")
+        valid, _msg = check_ccproxy_auth("codex")
         assert valid is True
         cmd = mock_run.call_args[0][0]
         assert cmd[1:] == ["auth", "status", "codex"]
